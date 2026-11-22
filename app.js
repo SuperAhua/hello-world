@@ -29,6 +29,11 @@
   var ACC_COLORS = ['#1677ff', '#1aad19', '#f0a500', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1'];
   var PSEUDO_ACC = { id: '', name: '未指定', color: '#9aa4b2', initial: 0 };
 
+  // 储蓄是个虚拟账户：存钱 = 从某个账户「转到」储蓄。
+  // 钱没花掉，只是换了个口袋，所以既不算支出也不算收入，但余额要跟着走。
+  var SAVINGS_ID = 'acc_savings';
+  var SAVINGS_ACC = { id: SAVINGS_ID, name: '储蓄', color: '#0891b2', initial: 0, builtin: true };
+
   var DEFAULT_ACCOUNTS = [
     { id: 'acc_alipay', name: '支付宝', color: '#1677ff' },
     { id: 'acc_wechat', name: '微信', color: '#1aad19' },
@@ -49,6 +54,8 @@
 
   var accounts = [];
   var currentAccId = '';
+  // 账户视图：非空时所有"看账"的地方只显示这个账户（'' = 全部账户）
+  var accView = '';
   var tpls = [];
   var quickId = null;
   var modalSave = null;
@@ -139,8 +146,9 @@
           amount: e.amount,
           item: e.item || '支出',
           category: e.category || '其他',
-          type: e.type === 'income' ? 'income' : 'expense',
+          type: (e.type === 'income' || e.type === 'transfer') ? e.type : 'expense',
           account: typeof e.account === 'string' ? e.account : '',
+          toAccount: typeof e.toAccount === 'string' ? e.toAccount : '',
           raw: e.raw || '',
           note: typeof e.note === 'string' ? e.note.slice(0, 120) : '',
           ts: typeof e.ts === 'number' ? e.ts : Date.now()
@@ -203,24 +211,97 @@
   }
 
   function accById(id) {
+    if (id === SAVINGS_ID) return SAVINGS_ACC;
     for (var i = 0; i < accounts.length; i++) if (accounts[i].id === id) return accounts[i];
     return PSEUDO_ACC;
   }
 
-  // 某账户已记账的净流入：收入 - 支出
+  function accIdByName(name) {
+    var n = String(name || '').trim();
+    if (!n) return '';
+    if (n === '储蓄' || n === SAVINGS_ACC.name) return SAVINGS_ID;
+    for (var i = 0; i < accounts.length; i++) if (accounts[i].name === n) return accounts[i].id;
+    return '';
+  }
+
+  function isTransfer(e) { return e && e.type === 'transfer'; }
+  function isSpend(e) { return e && e.type === 'expense'; }
+  function isIncome(e) { return e && e.type === 'income'; }
+
+  /* ---------------- 账户视图 ----------------
+     点某个账户 = 只看这本账：支出/收入按账户算，转账只要有一端是这个账户就都算进来
+     （转出是钱少了、转入是钱多了，都是这本账上的事）。 */
+  function inAccView(e, id) {
+    if (!id) return true;
+    if ((e.account || '') === id) return true;
+    return isTransfer(e) && (e.toAccount || '') === id;
+  }
+
+  function accScoped(list) {
+    if (!accView) return list;
+    return list.filter(function (e) { return inAccView(e, accView); });
+  }
+
+  function accViewName() {
+    return accView ? accById(accView).name : '';
+  }
+
+  // 点账户：切到这本账，顺便把它设成当前记账账户；再点一次回到全部
+  function viewAcc(id) {
+    if (!id) return;
+    if (id !== SAVINGS_ID) setCurrentAcc(id);   // 储蓄不是记账账户，只切视图
+    accView = (accView === id) ? '' : id;
+    var box = document.getElementById('day-card');
+    if (box) box.classList.remove('is-searching');
+    renderAll();
+    showToast(accView
+      ? '现在只看 <b>' + esc(accViewName()) + '</b> 的账 · 新记账也会记到这里'
+      : '已回到 <b>全部账户</b>');
+  }
+
+  function clearAccView() {
+    if (!accView) return;
+    accView = '';
+    renderAll();
+  }
+
+  // 列表里怎么显示一笔账：转账既不带 + 也不带 -，账户写成「A → B」
+  function entrySign(e) { return e.type === 'income' ? '+' : (isTransfer(e) ? '' : '-'); }
+  function entryAmtCls(e) { return e.type === 'income' ? ' income' : (isTransfer(e) ? ' transfer' : ''); }
+  function entryAccText(e) {
+    if (isTransfer(e)) return accById(e.account || '').name + ' → ' + accById(e.toAccount || '').name;
+    return e.account ? accById(e.account).name : '未指定';
+  }
+
+  // 某账户已记账的净流入：收入 - 支出 + 转入 - 转出
   function accFlow(id) {
     var s = 0;
     for (var i = 0; i < entries.length; i++) {
       var e = entries[i];
-      if ((e.account || '') !== id) continue;
+      var from = e.account || '', to = e.toAccount || '';
+      if (isTransfer(e)) {
+        if (from === id) s -= e.amount;
+        if (to === id) s += e.amount;
+        continue;
+      }
+      if (from !== id) continue;
       s += e.type === 'income' ? e.amount : -e.amount;
     }
     return s;
   }
 
-  // 余额 = 期初余额 + 已记账净流入
+  // 余额 = 期初余额 + 已记账净流入（储蓄没有期初，全靠存取累积）
   function accBalance(id) {
+    if (id === SAVINGS_ID) return accFlow(SAVINGS_ID);
     return (id ? (accById(id).initial || 0) : 0) + accFlow(id);
+  }
+
+  function hasSavings() {
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (isTransfer(e) && ((e.account || '') === SAVINGS_ID || (e.toAccount || '') === SAVINGS_ID)) return true;
+    }
+    return false;
   }
 
   function hasUnknownAcc() {
@@ -239,13 +320,35 @@
       var a = rows[i];
       var bal = a.id ? accBalance(a.id) : accFlow('');
       if (a.id) sum += bal;
-      html += '<button class="w-item' + (a.id === currentAccId ? ' sel' : '') + '" type="button" data-acc="' + esc(a.id) + '" title="点这里切换为当前记账账户">' +
+      html += '<button class="w-item' + (a.id === currentAccId ? ' sel' : '') + (a.id === accView ? ' view' : '') +
+        '" type="button" data-acc="' + esc(a.id) + '" title="' +
+        (a.id === accView ? '再点一次回到全部账户' : '点这里只看这本账') + '">' +
         '<i class="w-dot" style="background:' + a.color + '"></i>' +
         '<span class="w-name">' + esc(a.name) + '</span>' +
         '<b class="w-amt' + (bal < -0.005 ? ' neg' : '') + '">' + fmtSigned(bal) + '</b>' +
         '</button>';
     }
     $('#wallet-list').innerHTML = html;
+
+    // 储蓄单独一格：计入总资产，但不算支出。放滚动区外面，才不会被账户挤到看不见
+    var saveEl = $('#wallet-save');
+    if (saveEl) {
+      if (hasSavings()) {
+        var sv = accBalance(SAVINGS_ID);
+        sum += sv;
+        saveEl.innerHTML = '<i class="w-dot" style="background:' + SAVINGS_ACC.color + '"></i>' +
+          '<span class="w-name">储蓄</span>' +
+          '<b class="w-amt' + (sv < -0.005 ? ' neg' : '') + '">' + fmtSigned(sv) + '</b>';
+        saveEl.hidden = false;
+        saveEl.classList.toggle('view', accView === SAVINGS_ID);
+        saveEl.title = accView === SAVINGS_ID
+          ? '再点一次回到全部账户'
+          : '点这里只看储蓄的账 · 存进去的钱不计入支出';
+      } else {
+        saveEl.hidden = true;
+        saveEl.innerHTML = '';
+      }
+    }
 
     var sumEl = $('#wallet-sum');
     sumEl.textContent = fmtSigned(sum);
@@ -409,11 +512,12 @@
       amount: v,
       item: t.name,
       category: t.category,
-      type: t.category === '收入' ? 'income' : 'expense',
+      type: t.category === '收入' ? 'income' : (t.category === '储蓄' ? 'transfer' : 'expense'),
       account: currentAccId,
       raw: t.name + v,
       ts: Date.now()
     };
+    if (t.category === '储蓄') entry.toAccount = SAVINGS_ID;
     entries.push(entry);
     save();
 
@@ -433,23 +537,66 @@
   function renderTop() {
     var prefix = viewYear + '-' + pad(viewMonth + 1);
     var total = 0;
-    for (var i = 0; i < entries.length; i++) {
-      var e = entries[i];
-      if (e.type !== 'income' && e.date.slice(0, 7) === prefix) total += e.amount;
+    var src = accScoped(entries);
+    var isSave = accView === SAVINGS_ID;
+    for (var i = 0; i < src.length; i++) {
+      var e = src[i];
+      if (e.date.slice(0, 7) !== prefix) continue;
+      // 储蓄没有"支出"，只有存进去多少
+      if (isSave) { if (isTransfer(e) && e.toAccount === SAVINGS_ID) total += e.amount; }
+      else if (e.type === 'expense') total += e.amount;
     }
     var now = new Date();
     var isCur = (viewYear === now.getFullYear() && viewMonth === now.getMonth());
-    $('#top-label').textContent = isCur ? '本月支出' : (viewMonth + 1) + '月支出';
+    var label = isSave ? '本月存入' : (isCur ? '本月支出' : (viewMonth + 1) + '月支出');
+    $('#top-label').textContent = (accView ? accViewName() + ' · ' : '') + label;
     $('#top-total').textContent = '¥' + fmt(total);
+  }
+
+  /* ---------------- 账户视图提示条 ---------------- */
+  function renderAccBar() {
+    var el = $('#acc-bar');
+    if (!el) return;
+    if (!accView) { el.hidden = true; el.innerHTML = ''; return; }
+
+    var prefix = viewYear + '-' + pad(viewMonth + 1);
+    var exp = 0, inc = 0, put = 0, take = 0, m = accScoped(entries);
+    for (var i = 0; i < m.length; i++) {
+      if (m[i].date.slice(0, 7) !== prefix) continue;
+      if (m[i].type === 'expense') exp += m[i].amount;
+      else if (m[i].type === 'income') inc += m[i].amount;
+      else if (isTransfer(m[i])) {
+        if (m[i].toAccount === SAVINGS_ID) put += m[i].amount;
+        if (m[i].account === SAVINGS_ID) take += m[i].amount;
+      }
+    }
+
+    var acc = accById(accView);
+    // 储蓄没有收支，只有存进去、取出来
+    var sub = accView === SAVINGS_ID
+      ? (viewMonth + 1) + '月 存入 ¥' + fmt(put) + (take > 0 ? ' · 取出 ¥' + fmt(take) : '')
+      : (viewMonth + 1) + '月 支出 ¥' + fmt(exp) + (inc > 0 ? ' · 收入 ¥' + fmt(inc) : '');
+    el.innerHTML = '<i class="ab-dot" style="background:' + acc.color + '"></i>' +
+      '<b class="ab-name">' + esc(acc.name) + '</b>' +
+      '<span class="ab-sub">' + sub + '</span>' +
+      '<button class="ab-all" type="button" data-acc-all="1">看全部账户</button>';
+    el.hidden = false;
   }
 
   /* ---------------- 日历 ---------------- */
   function buildDayMap() {
     var map = {};
-    for (var i = 0; i < entries.length; i++) {
-      var e = entries[i];
-      if (!map[e.date]) map[e.date] = { exp: 0, inc: 0, cats: [] };
+    var src = accScoped(entries);
+    for (var i = 0; i < src.length; i++) {
+      var e = src[i];
+      if (!map[e.date]) map[e.date] = { exp: 0, inc: 0, put: 0, take: 0, cats: [] };
       var d = map[e.date];
+      if (e.type === 'transfer') {
+        // 转账不算收支，但储蓄视图要看得见「哪天存了、哪天取了」
+        if ((e.toAccount || '') === SAVINGS_ID) d.put += e.amount;
+        else if ((e.account || '') === SAVINGS_ID) d.take += e.amount;
+        continue;
+      }
       if (e.type === 'income') {
         d.inc += e.amount;
         if (d.cats.indexOf('收入') === -1) d.cats.push('收入');
@@ -541,14 +688,17 @@
     while (cells.length % 7 !== 0) cells.push({ out: true, num: nx++ });
 
     // 本月汇总（顺便收集每天支出，用来给热力分档）
-    var mExp = 0, mInc = 0, activeDays = 0, exps = [];
+    var mExp = 0, mInc = 0, mPut = 0, mTake = 0, activeDays = 0, exps = [];
+    var savingView = (accView === SAVINGS_ID);
     for (i = 0; i < cells.length; i++) {
       var cc = cells[i];
       if (cc.out || !cc.data) continue;
       mExp += cc.data.exp;
       mInc += cc.data.inc;
+      mPut += (cc.data.put || 0);
+      mTake += (cc.data.take || 0);
       if (cc.data.exp > 0) exps.push(cc.data.exp);
-      if (cc.data.exp > 0 || cc.data.inc > 0) activeDays++;
+      if (cc.data.exp > 0 || cc.data.inc > 0 || cc.data.put > 0 || cc.data.take > 0) activeDays++;
     }
     var hmap = heatMap(exps);
 
@@ -560,7 +710,7 @@
         continue;
       }
       var dots = '', tip = '';
-      var has = !!(c.data && (c.data.exp > 0 || c.data.inc > 0));
+      var has = !!(c.data && (c.data.exp > 0 || c.data.inc > 0 || c.data.put > 0 || c.data.take > 0));
       if (c.data) {
         var cats = c.data.cats.slice(0, 3);
         for (var k = 0; k < cats.length; k++) {
@@ -569,12 +719,19 @@
         var bits = [];
         if (c.data.exp > 0) bits.push('支出 ¥' + fmt(c.data.exp));
         if (c.data.inc > 0) bits.push('收入 ¥' + fmt(c.data.inc));
+        if (c.data.put > 0) bits.push('存入 ¥' + fmt(c.data.put));
+        if (c.data.take > 0) bits.push('取出 ¥' + fmt(c.data.take));
         tip = (viewMonth + 1) + '月' + c.num + '日' + (bits.length ? ' · ' + bits.join(' · ') : '');
       }
       // 金额就在日期正下方：支出 -金额，收入 +金额（收支格式统一带符号）
       // 没有记录也留一个空占位，保证同一行的日期对齐
       var amt = '<span class="damt"></span>';
-      if (c.data && c.data.exp > 0) {
+      if (savingView) {
+        // 储蓄这本账里没有支出，只有「存进去」和「取出来」
+        var net = (c.data ? (c.data.put || 0) - (c.data.take || 0) : 0);
+        if (c.data && net > 0) amt = '<span class="damt inc">+' + moneyShort(net) + '</span>';
+        else if (c.data && net < 0) amt = '<span class="damt exp">-' + moneyShort(-net) + '</span>';
+      } else if (c.data && c.data.exp > 0) {
         amt = '<span class="damt exp">-' + moneyShort(c.data.exp) + '</span>';
       } else if (c.data && c.data.inc > 0) {
         amt = '<span class="damt inc">+' + moneyShort(c.data.inc) + '</span>';
@@ -599,19 +756,63 @@
     var avg = avgN ? mExp / avgN : 0;
     var avgLab = isThisMonth ? ('已过 ' + avgN + ' 天') : (avgN ? '全月 ' + avgN + ' 天' : '—');
 
+    // 看的是往月就写「10月支出」，别一律叫「本月」
+    var mLabel = isThisMonth ? '本月' : (viewMonth + 1) + '月';
+
+    // 储蓄这本账里没有「支出/收入」，只有存进去、取出来和净存了多少
+    if (savingView) {
+      var svNet = mPut - mTake;
+      $('#cal-sum').innerHTML =
+        '<div class="cs"><span class="cs-l">' + mLabel + '存入</span>' +
+          (mPut > 0 ? '<b class="cs-v inc">+¥' + fmt(mPut) + '</b>' : '<b class="cs-v cs-zero">¥0</b>') + '</div>' +
+        '<div class="cs"><span class="cs-l">' + mLabel + '取出</span>' +
+          (mTake > 0 ? '<b class="cs-v">-¥' + fmt(mTake) + '</b>' : '<b class="cs-v cs-zero">¥0</b>') + '</div>' +
+        '<div class="cs cs-avg"><span class="cs-l">净存</span>' +
+          '<b class="cs-v">' + fmtSigned(svNet) + '</b></div>';
+      fitCalSum();
+      return;
+    }
+
     var csExp = mExp > 0
       ? '<b class="cs-v">-¥' + fmt(mExp) + '</b>'
       : '<b class="cs-v cs-zero">¥0</b>';
 
     var csThird = mInc > 0
-      ? '<span class="cs-l">本月收入</span><b class="cs-v inc">+¥' + fmt(mInc) + '</b>'
+      ? '<span class="cs-l">' + mLabel + '收入</span><b class="cs-v inc">+¥' + fmt(mInc) + '</b>'
       : '<span class="cs-l">记账天数</span><b class="cs-v">' + activeDays + ' 天</b>';
 
     $('#cal-sum').innerHTML =
-      '<div class="cs"><span class="cs-l">本月支出</span>' + csExp + '</div>' +
-      '<div class="cs cs-avg"><span class="cs-l">日均<em>' + avgLab + '</em></span>' +
+      '<div class="cs"><span class="cs-l">' + mLabel + '支出</span>' + csExp + '</div>' +
+      '<div class="cs cs-avg"><span class="cs-l">日均<em>' + avgLab + '</em>' +
+        (avgN ? '<i class="cs-d">·' + avgN + '天</i>' : '') + '</span>' +
         '<b class="cs-v">¥' + fmt(Math.round(avg)) + '</b></div>' +
       '<div class="cs">' + csThird + '</div>';
+    fitCalSum();
+  }
+
+  // 汇总条只有三格宽，金额带小数就容易被省略号切掉；按列宽等比缩字号兜住，
+  // 三格取同一个最终字号，免得一条里三个数字大小不一
+  function fitCalSum() {
+    var box = $('#cal-sum');
+    if (!box) return;
+    var vals = [].slice.call(box.querySelectorAll('.cs-v'));
+    if (!vals.length) return;
+    var sizes = [];
+    for (var i = 0; i < vals.length; i++) {
+      var v = vals[i];
+      v.style.fontSize = '';
+      var size = parseFloat(getComputedStyle(v).fontSize) || 12.5;
+      for (var k = 0; k < 14; k++) {
+        if (v.scrollWidth <= v.clientWidth + 0.5) break;
+        if (!(size > 9.5)) break;
+        size -= 0.5;
+        v.style.fontSize = size + 'px';
+      }
+      sizes.push(parseFloat(getComputedStyle(v).fontSize) || size);
+    }
+    var use = Math.min.apply(null, sizes);
+    if (!isFinite(use)) return;
+    for (var j = 0; j < vals.length; j++) vals[j].style.fontSize = use + 'px';
   }
 
   /* ---------------- 当日明细 ---------------- */
@@ -631,7 +832,7 @@
       el.innerHTML = '<span class="bd-dot"></span>' +
         '<span>这一笔记到 <b>' + m + '月' + d + '日</b> <span class="bd-week">' + week + '</span></span>' +
         '<span class="bd-tip">不写日期就记在这天，写了日期以输入为准</span>' +
-        '<button class="bd-btn" type="button" id="badge-today">回到今天</button>';
+        '<button class="bd-btn" type="button" id="badge-today">记今天</button>';
       var btn = $('#badge-today');
       if (btn) btn.addEventListener('click', goToday);
     }
@@ -649,27 +850,34 @@
     var isToday = selectedDate === ymd(new Date());
 
     $('#day-title').textContent = m + '月' + d + '日';
-    $('#day-sub').textContent = WEEK[dt.getDay()] + (isToday ? ' · 今天' : '');
+    $('#day-sub').textContent = WEEK[dt.getDay()] + (isToday ? ' · 今天' : '') +
+      (accView ? ' · 只看' + accViewName() : '');
     renderDayBadge(isToday, m, d, WEEK[dt.getDay()]);
 
-    var list = entries.filter(function (e) { return e.date === selectedDate; });
+    var list = accScoped(entries).filter(function (e) { return e.date === selectedDate; });
     list.sort(function (a, b) { return b.ts - a.ts; });
 
-    var exp = 0, inc = 0;
+    var exp = 0, inc = 0, trs = 0;
     for (var i = 0; i < list.length; i++) {
-      if (list[i].type === 'income') inc += list[i].amount;
-      else exp += list[i].amount;
+      var it = list[i];
+      if (it.type === 'income') inc += it.amount;
+      else if (it.type === 'transfer') trs += it.amount;
+      else exp += it.amount;
     }
 
-    var totals = '<div><span>支出</span><strong>¥' + fmt(exp) + '</strong></div>';
+    // 0 的那一项就别占位置了：只有收入的一天写「支出 ¥0」纯属噪音
+    var totals = exp > 0 ? '<div><span>支出</span><strong>¥' + fmt(exp) + '</strong></div>' : '';
     if (inc > 0) totals += '<div class="inc"><span>收入</span><strong>¥' + fmt(inc) + '</strong></div>';
+    if (trs > 0) totals += '<div class="tr"><span>' + (accView === SAVINGS_ID ? '存取' : '转账') +
+      '</span><strong>¥' + fmt(trs) + '</strong></div>';
     $('#day-totals').innerHTML = totals;
 
     renderDaySummary(list, exp, inc);
 
     var box = $('#day-list');
     if (!list.length) {
-      box.innerHTML = '<div class="empty"><b>这一天还没有记账</b>在上方输入框说一句话就能记上<br>例如「今天打车35」或「中饭20 晚饭39」</div>';
+      var who = accView ? esc(accViewName()) + ' ' : '';
+      box.innerHTML = '<div class="empty"><b>' + who + '这一天还没有记账</b>在上方输入框说一句话就能记上<br>例如「今天打车35」或「中饭20 晚饭39」</div>';
       return;
     }
 
@@ -677,19 +885,19 @@
     for (var j = 0; j < list.length; j++) {
       var e = list[j];
       var color = catColor(e.category);
-      var sign = e.type === 'income' ? '+' : '-';
+      var sign = entrySign(e);
       html += '<div class="entry" data-id="' + esc(e.id) + '">' +
         '<span class="dot" style="background:' + color + '"></span>' +
         '<div class="entry-main">' +
         '<div class="entry-title">' + esc(e.item) + '</div>' +
         '<div class="entry-sub">' +
         '<span class="cat-tag" style="color:' + color + ';background:' + tint(color) + '">' + esc(e.category) + '</span>' +
-        '<span class="entry-acc">' + esc(e.account ? accById(e.account).name : '未指定') + '</span>' +
+        '<span class="entry-acc">' + esc(entryAccText(e)) + '</span>' +
         '<span>' + timeLabel(e.ts) + '</span>' +
         '</div>' +
         (e.note ? '<div class="entry-note">' + esc(e.note) + '</div>' : '') +
         '</div>' +
-        '<div class="entry-amt' + (e.type === 'income' ? ' income' : '') + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>' +
+        '<div class="entry-amt' + entryAmtCls(e) + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>' +
         '<button class="entry-del" data-del="' + e.id + '" title="删除这笔">×</button>' +
         '</div>';
     }
@@ -700,24 +908,40 @@
   function renderDaySummary(list, exp, inc) {
     var box = $('#day-summary');
     if (!box) return;
+    box.classList.remove('is-noteonly');
 
-    var byCat = {}, cnt = {}, order = [];
+    var byCat = {}, cnt = {}, order = [], trs = 0;
     for (var i = 0; i < list.length; i++) {
       var e = list[i];
       if (e.type === 'income') continue;
+      if (e.type === 'transfer') { trs += e.amount; continue; }   // 转账不参与占比
       if (!byCat[e.category]) { byCat[e.category] = 0; cnt[e.category] = 0; order.push(e.category); }
       byCat[e.category] += e.amount;
       cnt[e.category]++;
     }
 
+    var trNote = trs > 0 ? '转账/储蓄 ¥' + fmt(trs) + ' 不计入' : '';
+    // 看的是往月就不能说「今天」
+    var dayWord = (selectedDate === ymd(new Date())) ? '今天' : '这天';
+
     if (!order.length) {
-      box.innerHTML = inc > 0
-        ? '<div class="ds-head"><b>分类汇总</b><span class="ds-note">今天只有收入 ¥' + fmt(inc) + '</span></div>'
+      // 只有收入 / 转账的一天没有分类可汇总，只留一句说明（手机上这行是唯一的汇总）
+      if (inc > 0 || trs > 0) box.classList.add('is-noteonly');
+      box.innerHTML = (inc > 0 || trs > 0)
+        ? '<div class="ds-head"><b>分类汇总</b><span class="ds-note">' +
+          (inc > 0 ? dayWord + '只有收入 ¥' + fmt(inc) : dayWord + '没有支出') +
+          (trNote ? ' · ' + trNote : '') + '</span></div>'
         : '';
       return;
     }
 
     order.sort(function (a, b) { return byCat[b] - byCat[a]; });
+
+    // 一天就一笔，日头和这笔明细已经把话说完了，再来一句「日用 ¥360.50 100%」纯属重复
+    if (order.length === 1 && cnt[order[0]] === 1 && !(inc > 0) && !(trs > 0)) {
+      box.innerHTML = '';
+      return;
+    }
 
     var bar = '', pills = '';
     for (var j = 0; j < order.length; j++) {
@@ -725,7 +949,8 @@
       var val = byCat[name];
       var col = catColor(name);
       var pct = exp > 0 ? Math.round(val / exp * 100) : 0;
-      bar += '<i style="width:' + (exp > 0 ? val / exp * 100 : 0) + '%;background:' + col + '"></i>';
+      // 只有一类时这根彩条必然是满格，画了反而像进度条
+      if (order.length > 1) bar += '<i style="width:' + (exp > 0 ? val / exp * 100 : 0) + '%;background:' + col + '"></i>';
       pills += '<span class="ds-pill"><i style="background:' + col + '"></i>' + esc(name) +
         ' <b>¥' + fmt(val) + '</b>' +
         (cnt[name] > 1 ? '<em>' + cnt[name] + '笔</em>' : '') +
@@ -734,9 +959,10 @@
 
     var note = list.length + ' 笔 · 支出 ¥' + fmt(exp);
     if (inc > 0) note += ' · 收入 ¥' + fmt(inc);
+    if (trNote) note += ' · ' + trNote;
 
     box.innerHTML = '<div class="ds-head"><b>分类汇总</b><span class="ds-note">' + note + '</span></div>' +
-      '<div class="ds-bar">' + bar + '</div>' +
+      (bar ? '<div class="ds-bar">' + bar + '</div>' : '') +
       '<div class="ds-pills">' + pills + '</div>';
   }
 
@@ -748,11 +974,13 @@
     if (!raw) return [];
     var toks = raw.split(/[\s,，、]+/).filter(function (t) { return t; });
     var out = [];
+    var pool = accScoped(entries);   // 账户视图下只搜这本账
 
-    for (var i = 0; i < entries.length; i++) {
-      var e = entries[i];
+    for (var i = 0; i < pool.length; i++) {
+      var e = pool[i];
       var hay = (e.item + ' ' + e.category + ' ' + (e.note || '') + ' ' + (e.raw || '') + ' ' +
-        (e.account ? accById(e.account).name : '未指定')).toLowerCase();
+        (e.account ? accById(e.account).name : '未指定') + ' ' +
+        (isTransfer(e) ? accById(e.toAccount || '').name : '')).toLowerCase();
       var amtStr = String(e.amount);
       var amtFmt = fmt(e.amount).replace(/,/g, '');
       var ok = true;
@@ -782,18 +1010,23 @@
     if (clearBtn) clearBtn.hidden = !searchQuery;
 
     var hits = searchHits(searchQuery);
-    var exp = 0, inc = 0;
+    var exp = 0, inc = 0, trs = 0;
     for (var i = 0; i < hits.length; i++) {
       if (hits[i].type === 'income') inc += hits[i].amount;
+      else if (hits[i].type === 'transfer') trs += hits[i].amount;
       else exp += hits[i].amount;
     }
 
     $('#day-title').textContent = '搜索结果';
     $('#day-sub').textContent = '「' + searchQuery + '」· ' +
-      (hits.length ? hits.length + ' 笔' : '没有匹配') + ' · 已翻遍所有月份';
+      (hits.length ? hits.length + ' 笔' : '没有匹配') +
+      (accView ? ' · 只在 ' + accViewName() + ' 里找' : ' · 已翻遍所有月份');
 
-    var totals = '<div><span>支出</span><strong>¥' + fmt(exp) + '</strong></div>';
+    // 0 的那一项就别占位置了：只有收入的一天写「支出 ¥0」纯属噪音
+    var totals = exp > 0 ? '<div><span>支出</span><strong>¥' + fmt(exp) + '</strong></div>' : '';
     if (inc > 0) totals += '<div class="inc"><span>收入</span><strong>¥' + fmt(inc) + '</strong></div>';
+    if (trs > 0) totals += '<div class="tr"><span>' + (accView === SAVINGS_ID ? '存取' : '转账') +
+      '</span><strong>¥' + fmt(trs) + '</strong></div>';
     $('#day-totals').innerHTML = totals;
 
     $('#day-summary').innerHTML = '';
@@ -811,7 +1044,7 @@
       var color = catColor(e.category);
       var p = e.date.split('-');
       var yy = p[0] === String(viewYear) ? '' : p[0].slice(2) + '年';
-      var sign = e.type === 'income' ? '+' : '-';
+      var sign = entrySign(e);
       html += '<div class="entry" data-id="' + esc(e.id) + '">' +
         '<span class="dot" style="background:' + color + '"></span>' +
         '<div class="entry-main">' +
@@ -819,11 +1052,11 @@
         '<div class="entry-sub">' +
         '<span class="entry-date">' + yy + parseInt(p[1], 10) + '月' + parseInt(p[2], 10) + '日</span>' +
         '<span class="cat-tag" style="color:' + color + ';background:' + tint(color) + '">' + esc(e.category) + '</span>' +
-        '<span class="entry-acc">' + esc(e.account ? accById(e.account).name : '未指定') + '</span>' +
+        '<span class="entry-acc">' + esc(entryAccText(e)) + '</span>' +
         '</div>' +
         (e.note ? '<div class="entry-note">' + esc(e.note) + '</div>' : '') +
         '</div>' +
-        '<div class="entry-amt' + (e.type === 'income' ? ' income' : '') + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>' +
+        '<div class="entry-amt' + entryAmtCls(e) + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>' +
         '<button class="entry-del" data-del="' + e.id + '" title="删除这笔">×</button>' +
         '</div>';
     }
@@ -849,7 +1082,9 @@
 
   // 解析基准 = 当前选中的那天：没说日期就记在那天，「今天/昨天」也以那天为参照
   function parseForInput(text) {
-    return parseInputs(text, { base: selectedDateObj(), today: new Date() });
+    // 把账户名交给解析器，「支付宝转银行卡500」才能认出两端
+    var names = accounts.map(function (a) { return a.name; });
+    return parseInputs(text, { base: selectedDateObj(), today: new Date(), accounts: names });
   }
 
   /* ---------------- 手动选分类 ---------------- */
@@ -870,9 +1105,30 @@
     r.items.forEach(function (p, i) {
       var c = overrideFor(raw, i);
       if (!c) return;
-      p.category = c;
-      p.color = catColor(c);
-      p.type = c === '收入' ? 'income' : 'expense';
+      if (c === '储蓄') {
+        // 手选「储蓄」= 这笔钱存起来了：改成转账，统计里不算支出
+        p.category = c;
+        p.color = catColor(c);
+        p.type = 'transfer';
+        p.fromName = p.fromName || '';
+        p.toName = '储蓄';
+      } else if (c === P.TRANSFER_CAT) {
+        // 手选「转账」= 钱在两个账户之间挪，既不是支出也不是收入
+        p.category = c;
+        p.color = P.TRANSFER_COLOR;
+        p.type = 'transfer';
+        p.item = (p.fromName || '当前账户') + ' → ' + (p.toName || '未指定');
+      } else if (c === '收入') {
+        p.category = c;
+        p.color = catColor(c);
+        p.type = 'income';
+        p.toName = '';
+      } else {
+        p.category = c;
+        p.color = catColor(c);
+        p.type = 'expense';
+        if (p.toName === '储蓄') p.toName = '';
+      }
       p.manual = true;
     });
     var f = r.items[0];
@@ -880,6 +1136,11 @@
     r.color = f.color;
     r.type = f.type;
     return r;
+  }
+
+  // 预览里别显示「当前账户」，直接写当前账户真名，省得用户猜
+  function dispItem(p) {
+    return String(p.item || '').replace(/当前账户/g, accById(currentAccId).name);
   }
 
   function catTag(p, idx) {
@@ -907,6 +1168,11 @@
         ' style="' + (on ? 'color:' + c.color + ';border-color:' + c.color + ';background:' + tint(c.color, 0.14) : '') + '">' +
         esc(c.name) + '</button>';
     }).join('');
+    // 「转账」不在分类词典里（它只是个收支属性），单独补一个，识别错了也能手动改
+    chips += '<button type="button" class="cp-chip' + (cur === P.TRANSFER_CAT ? ' is-on' : '') + '" data-cat="' +
+      esc(P.TRANSFER_CAT) + '" style="' + (cur === P.TRANSFER_CAT
+        ? 'color:' + P.TRANSFER_COLOR + ';border-color:' + P.TRANSFER_COLOR + ';background:' + tint(P.TRANSFER_COLOR, 0.14)
+        : '') + '">' + esc(P.TRANSFER_CAT) + '</button>';
     box.innerHTML = '<span class="cp-lab">' + (r.count > 1 ? '第 ' + (idx + 1) + ' 笔记作' : '这笔记作') + '</span>' +
       chips +
       '<button type="button" class="cp-chip cp-auto" data-cat="">自动识别</button>';
@@ -951,29 +1217,34 @@
       var p = r.items[0];
       box.innerHTML = '<span class="pv-lead">将记为</span>' +
         catTag(p, 0) +
-        '<span>' + esc(p.item) + '</span>' +
-        '<span class="pv-sep">·</span><strong>' + (p.type === 'income' ? '+' : '-') + '¥' + fmt(p.amount) + '</strong>' +
+        '<span>' + esc(dispItem(p)) + '</span>' +
+        (p.accName ? '<span class="pv-acc">' + esc(p.accName) + '</span>' : '') +
+        '<span class="pv-sep">·</span><strong>' + entrySign(p) + '¥' + fmt(p.amount) + '</strong>' +
         '<span class="pv-sep">·</span><span>' + esc(p.dateLabel) + '</span>';
       renderCatPick(r, text);
       return;
     }
 
     // 多笔：逐条列出，确认无误再一次性入账
-    var exp = 0, inc = 0;
+    var exp = 0, inc = 0, trn = 0;
     var rows = r.items.map(function (p, i) {
-      if (p.type === 'income') inc += p.amount; else exp += p.amount;
+      if (p.type === 'income') inc += p.amount;
+      else if (p.type === 'transfer') trn += p.amount;
+      else exp += p.amount;
       return '<li>' +
         catTag(p, i) +
-        '<span class="pv-item">' + esc(p.item) + '</span>' +
+        '<span class="pv-item">' + esc(dispItem(p)) + '</span>' +
+        (p.accName ? '<span class="pv-acc">' + esc(p.accName) + '</span>' : '') +
         '<span class="pv-date">' + esc(p.dateLabel) + '</span>' +
-        '<strong class="pv-amt' + (p.type === 'income' ? ' income' : '') + '">' +
-        (p.type === 'income' ? '+' : '-') + '¥' + fmt(p.amount) + '</strong>' +
+        '<strong class="pv-amt' + entryAmtCls(p) + '">' +
+        entrySign(p) + '¥' + fmt(p.amount) + '</strong>' +
         '</li>';
     }).join('');
 
     var head = '识别到 <b>' + r.count + '</b> 笔';
     if (exp > 0) head += ' · 支出 <b>¥' + fmt(exp) + '</b>';
     if (inc > 0) head += ' · 收入 <b class="pv-inc">¥' + fmt(inc) + '</b>';
+    if (trn > 0) head += ' · 转账 <b>¥' + fmt(trn) + '</b>';
 
     box.classList.add('is-multi');
     box.innerHTML = '<div class="pv-multi">' +
@@ -1002,10 +1273,26 @@
         item: p.item,
         category: p.category,
         type: p.type,
-        account: currentAccId,
+        // 句子里点名了账户（「微信 奶茶18」）就记到那个账户
+        account: (p.accName && accIdByName(p.accName)) || currentAccId,
         raw: r.raw,
         ts: base + i
       };
+      if (p.type === 'transfer') {
+        // 转出方没写就用当前账户；转入方没写就是「未指定」（钱确实出去了）
+        var fromId = p.fromName ? accIdByName(p.fromName) : currentAccId;
+        var toId = p.toName ? accIdByName(p.toName) : '';
+        // 「从储蓄取出来」没说去处 → 回到当前账户
+        if (!toId && p.fromName === P.SAVINGS_NAME) toId = currentAccId;
+        entry.account = fromId || currentAccId;
+        if (toId === entry.account && toId !== SAVINGS_ID) toId = '';
+        entry.toAccount = toId || '';
+        if (entry.category === P.TRANSFER_CAT) {
+          entry.item = accById(entry.account).name + ' → ' + accById(entry.toAccount || '').name;
+        } else if (entry.item.indexOf('当前账户') !== -1) {
+          entry.item = entry.item.replace(/当前账户/g, accById(entry.account).name);
+        }
+      }
       entries.push(entry);
       return entry;
     });
@@ -1034,18 +1321,24 @@
 
     if (added.length === 1) {
       var e0 = added[0];
-      showToast('已记账：' + esc(e0.category) + ' · ' + esc(e0.item) + ' <b>¥' + fmt(e0.amount) + '</b>（' + esc(r.items[0].dateLabel) + '）', undo);
+      // 转账的名字本身就是「A → B」，再叠一个分类就重复了
+      var head0 = isTransfer(e0) ? (e0.category === P.TRANSFER_CAT ? '已转账：' : '已存钱：') : '已记账：';
+      var what0 = isTransfer(e0) ? esc(e0.item) : esc(e0.category) + ' · ' + esc(e0.item);
+      showToast(head0 + what0 + ' <b>¥' + fmt(e0.amount) + '</b>（' + esc(r.items[0].dateLabel) + '）', undo);
       return;
     }
 
-    var exp = 0, inc = 0, daySet = {};
+    var exp = 0, inc = 0, trn = 0, daySet = {};
     added.forEach(function (e) {
       daySet[e.date] = 1;
-      if (e.type === 'income') inc += e.amount; else exp += e.amount;
+      if (e.type === 'income') inc += e.amount;
+      else if (e.type === 'transfer') trn += e.amount;
+      else exp += e.amount;
     });
     var msg = '已记 <b>' + added.length + '</b> 笔';
     if (exp > 0) msg += ' · 支出 <b>¥' + fmt(exp) + '</b>';
     if (inc > 0) msg += ' · 收入 <b>¥' + fmt(inc) + '</b>';
+    if (trn > 0) msg += ' · 转账 <b>¥' + fmt(trn) + '</b>';
     var days = Object.keys(daySet);
     msg += '（' + (days.length === 1 ? esc(r.items[0].dateLabel) : days.length + ' 天') + '）';
     showToast(msg, undo);
@@ -1111,9 +1404,9 @@
   }
 
   /* ---------------- 统计 ---------------- */
-  function monthEntries(y, m) {
+  function monthEntries(y, m, src) {
     var prefix = y + '-' + pad(m + 1);
-    return entries.filter(function (e) { return e.date.slice(0, 7) === prefix; });
+    return (src || entries).filter(function (e) { return e.date.slice(0, 7) === prefix; });
   }
 
   function sumBy(list, type) {
@@ -1129,23 +1422,32 @@
     var mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
     var sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
     var weekFrom = ymd(mon), weekTo = ymd(sun);
+    // 账户视图下统计也只算这本账
+    var src = accScoped(entries);
 
     var weekTotal = 0;
-    for (var i = 0; i < entries.length; i++) {
-      var e = entries[i];
-      if (e.type !== 'income' && e.date >= weekFrom && e.date <= weekTo) weekTotal += e.amount;
+    for (var i = 0; i < src.length; i++) {
+      var e = src[i];
+      if (e.type === 'expense' && e.date >= weekFrom && e.date <= weekTo) weekTotal += e.amount;
     }
 
     var yearTotal = 0;
-    for (var j = 0; j < entries.length; j++) {
-      var e2 = entries[j];
-      if (e2.type !== 'income' && e2.date.slice(0, 4) === String(viewYear)) yearTotal += e2.amount;
+    for (var j = 0; j < src.length; j++) {
+      var e2 = src[j];
+      if (e2.type === 'expense' && e2.date.slice(0, 4) === String(viewYear)) yearTotal += e2.amount;
     }
 
-    var list = monthEntries(viewYear, viewMonth);
-    var expList = list.filter(function (x) { return x.type !== 'income'; });
+    var list = monthEntries(viewYear, viewMonth, src);
+    var expList = list.filter(function (x) { return x.type === 'expense'; });
     var monthTotal = sumBy(list, 'expense');
     var monthInc = sumBy(list, 'income');
+    // 存进储蓄的钱和账户互转都不算收支，单独统计一笔，好让人知道钱去哪了
+    var saveTotal = 0, transferTotal = 0;
+    for (var t1 = 0; t1 < list.length; t1++) {
+      if (list[t1].type !== 'transfer') continue;
+      if (list[t1].category === '储蓄') saveTotal += list[t1].amount;
+      else transferTotal += list[t1].amount;
+    }
 
     var dayTotals = {};
     for (var k = 0; k < expList.length; k++) {
@@ -1166,15 +1468,17 @@
     $('#stat-week-sub').textContent = (mon.getMonth() + 1) + '月' + mon.getDate() + '日 - ' + (sun.getMonth() + 1) + '月' + sun.getDate() + '日';
     $('#stat-month-label').textContent = isCur ? '本月支出' : (viewMonth + 1) + '月支出';
     $('#stat-month').textContent = '¥' + fmt(monthTotal);
-    $('#stat-month-sub').textContent = viewYear + '年' + (viewMonth + 1) + '月 · ' + activeDays + ' 天有记账';
+    $('#stat-month-sub').innerHTML = esc((accView ? accViewName() + ' · ' : '') + viewYear + '年' + (viewMonth + 1) + '月 · ' + activeDays + ' 天有记账') +
+      (saveTotal > 0 ? '<br><span class="nowrap">储蓄 ¥' + fmt(saveTotal) + ' 未计入支出</span>' : '');
     $('#stat-year').textContent = '¥' + fmt(yearTotal);
-    $('#stat-year-sub').textContent = viewYear + '年 · ' + entries.filter(function (x) { return x.date.slice(0, 4) === String(viewYear); }).length + ' 笔记录';
+    $('#stat-year-sub').textContent = viewYear + '年 · ' + src.filter(function (x) { return x.date.slice(0, 4) === String(viewYear); }).length + ' 笔记录';
     $('#stat-income').textContent = '¥' + fmt(monthInc);
     $('#stat-income-sub').textContent = monthInc > 0 ? ('结余 ' + fmtSigned(monthInc - monthTotal)) : '本月暂无收入记录';
 
     // 图表标题
-    $('#pie-title').textContent = (isCur ? '本月' : (viewMonth + 1) + '月') + '消费分类';
-    $('#line-title').textContent = (isCur ? '本月' : (viewMonth + 1) + '月') + '每日支出';
+    var chartWho = accView ? accViewName() + ' · ' : '';
+    $('#pie-title').textContent = chartWho + (isCur ? '本月' : (viewMonth + 1) + '月') + '消费分类';
+    $('#line-title').textContent = chartWho + (isCur ? '本月' : (viewMonth + 1) + '月') + '每日支出';
     $('#pie-note').textContent = expList.length ? ('共 ' + expList.length + ' 笔 · 点色块看明细') : '';
     // 日均按「已过的每一天」算：没记账的那天也占一天
     var avgN = avgDays(viewYear, viewMonth);
@@ -1215,15 +1519,15 @@
     // 上月对比
     var lmY = viewMonth === 0 ? viewYear - 1 : viewYear;
     var lmM = viewMonth === 0 ? 11 : viewMonth - 1;
-    var lastTotal = sumBy(monthEntries(lmY, lmM), 'expense');
+    var lastTotal = sumBy(monthEntries(lmY, lmM, src), 'expense');
 
-    $('#insight').innerHTML = buildInsight(catData, monthTotal, monthInc, lastTotal, activeDays, maxDay, avgN);
+    $('#insight').innerHTML = buildInsight(catData, monthTotal, monthInc, lastTotal, activeDays, maxDay, avgN, saveTotal);
 
     renderBudgetMeter();
     renderAI();
   }
 
-  function buildInsight(catData, total, income, lastTotal, activeDays, maxDay, avgN) {
+  function buildInsight(catData, total, income, lastTotal, activeDays, maxDay, avgN, saveTotal) {
     var parts = [];
     if (!total) {
       parts.push('这个月还没有支出记录，记上第一笔就能看到小结了。');
@@ -1253,6 +1557,9 @@
     }
     if (income > 0) {
       parts.push('本月收入 <b>¥' + fmt(income) + '</b>，结余 <b>' + fmtSigned(income - total) + '</b>。');
+    }
+    if (saveTotal > 0) {
+      parts.push('另外存进储蓄 <b>¥' + fmt(saveTotal) + '</b>，这笔不算支出，但也确实从手头账户里挪走了。');
     }
     return parts.map(function (p) { return '<p>' + p + '</p>'; }).join('');
   }
@@ -1494,8 +1801,11 @@
   }
 
   function renderAll() {
+    // 正在看的账户被删掉了就退回全部账户，免得整页空白
+    if (accView && !accById(accView).id) accView = '';
     renderChipLine();
     renderWallet();
+    renderAccBar();
     renderTop();
     renderCalendar();
     renderDay();
@@ -1651,6 +1961,8 @@
 
   function catOptions(cur) {
     var opts = '';
+    // 「转账」不在常规分类里，只有本身是转账的这笔才补一个选项
+    if (cur === P.TRANSFER_CAT) opts += '<option value="' + esc(P.TRANSFER_CAT) + '" selected>转账</option>';
     for (var i = 0; i < P.CATEGORIES.length; i++) {
       var c = P.CATEGORIES[i];
       opts += '<option value="' + esc(c.name) + '"' + (c.name === cur ? ' selected' : '') + '>' + esc(c.name) + '</option>';
@@ -1658,8 +1970,11 @@
     return opts;
   }
 
-  function accOptions(cur) {
+  function accOptions(cur, withSavings) {
     var opts = '';
+    if (withSavings) {
+      opts += '<option value="' + SAVINGS_ID + '"' + (cur === SAVINGS_ID ? ' selected' : '') + '>储蓄</option>';
+    }
     for (var i = 0; i < accounts.length; i++) {
       opts += '<option value="' + esc(accounts[i].id) + '"' + (accounts[i].id === cur ? ' selected' : '') + '>' + esc(accounts[i].name) + '</option>';
     }
@@ -1736,7 +2051,8 @@
         '<label class="ef-row"><span>金额</span><span class="ef-money"><i>¥</i>' +
         '<input id="ef-amount" inputmode="decimal" autocomplete="off" value="' + e.amount.toFixed(2) + '"></span></label>' +
         '<label class="ef-row"><span>分类</span><select class="f-inp" id="ef-cat">' + catOptions(e.category) + '</select></label>' +
-        '<label class="ef-row"><span>账户</span><select class="f-inp" id="ef-acc">' + accOptions(e.account || '') + '</select></label>' +
+        '<label class="ef-row"><span>' + (isTransfer(e) ? '转出' : '账户') + '</span><select class="f-inp" id="ef-acc">' + accOptions(e.account || '') + '</select></label>' +
+        (isTransfer(e) ? '<label class="ef-row"><span>转入</span><select class="f-inp" id="ef-acc-to">' + accOptions(e.toAccount || '', true) + '</select></label>' : '') +
         '<label class="ef-row"><span>日期</span><input class="f-inp" id="ef-date" type="date" value="' + esc(e.date) + '"></label>' +
         '<label class="ef-row ef-row-top"><span>细节</span><textarea class="f-inp f-note" id="ef-note" rows="2" maxlength="120" placeholder="比如：吃了包子油条">' + esc(e.note || '') + '</textarea></label>' +
         '</div>',
@@ -1760,8 +2076,24 @@
     e.amount = Math.round(amt * 100) / 100;
     e.item = (name || cat).slice(0, 24);
     e.category = cat;
-    e.type = cat === '收入' ? 'income' : 'expense';
     e.account = $('#ef-acc').value || '';
+
+    // 分类是「转账」或「储蓄」时，这笔仍然是转账，不算支出
+    if (cat === P.TRANSFER_CAT || cat === '储蓄') {
+      var toSel = $('#ef-acc-to');
+      var to = cat === '储蓄' ? SAVINGS_ID : ((toSel && toSel.value) || e.toAccount || '');
+      if (!to) { showToast('选一下转到哪个账户'); return false; }
+      if (to === e.account) { showToast('转出和转入不能是同一个账户'); return false; }
+      e.type = 'transfer';
+      e.toAccount = to;
+      // 名字本来就是「A → B」的，跟着账户改，别让标题和右侧账户对不上
+      if (cat === P.TRANSFER_CAT && String(e.item).indexOf('→') !== -1) {
+        e.item = accById(e.account || '').name + ' → ' + accById(to).name;
+      }
+    } else {
+      e.type = cat === '收入' ? 'income' : 'expense';
+      delete e.toAccount;
+    }
 
     var noteEl = $('#ef-note');
     if (noteEl) {
@@ -1918,10 +2250,18 @@
   /* ---------------- AI 收支分析 ---------------- */
   function aiMonthStats(y, m) {
     var list = monthEntries(y, m);
-    var exp = list.filter(function (x) { return x.type !== 'income'; });
+    var exp = list.filter(function (x) { return x.type === 'expense'; });
     var inc = list.filter(function (x) { return x.type === 'income'; });
     var expTotal = sumBy(list, 'expense');
     var incTotal = sumBy(list, 'income');
+
+    // 储蓄与账户互转都不算收支，但要告诉模型，否则它会以为钱凭空消失了
+    var saveTotal = 0, moveTotal = 0;
+    for (var ti = 0; ti < list.length; ti++) {
+      if (list[ti].type !== 'transfer') continue;
+      if (list[ti].category === '储蓄') saveTotal += list[ti].amount;
+      else moveTotal += list[ti].amount;
+    }
 
     var byCat = {}, byAcc = {}, byDay = {};
     for (var i = 0; i < exp.length; i++) {
@@ -1978,6 +2318,8 @@
       period: y + '-' + pad(m + 1),
       expense: Math.round(expTotal * 100) / 100,
       income: Math.round(incTotal * 100) / 100,
+      savings: Math.round(saveTotal * 100) / 100,
+      transfers: Math.round(moveTotal * 100) / 100,
       balance: Math.round((incTotal - expTotal) * 100) / 100,
       count: exp.length,
       activeDays: days,
@@ -1996,7 +2338,9 @@
 
   function aiMessages(stats) {
     var sys = '你是一位务实、克制的个人财务顾问。你看到的是中文记账 App 导出的月度汇总（JSON）。' +
-      '请只基于给定数字分析，绝不编造不存在的数据；不写客套话，不重复罗列全部数字。';
+      '请只基于给定数字分析，绝不编造不存在的数据；不写客套话，不重复罗列全部数字。' +
+      '注意：expense 已排除存进储蓄的钱，savings 是当月存入储蓄的金额，transfers 是账户之间互转，' +
+      '两者都不算支出也不算收入，分析时别把它们并进支出里。';
 
     var user = '这是我 ' + stats.period + ' 的账本数据：\n' + JSON.stringify(stats) + '\n\n' +
       '请输出四部分，用 Markdown 小标题：\n' +
@@ -2028,7 +2372,7 @@
   }
 
   function aiSig(stats) {
-    return [stats.expense, stats.income, stats.count, stats.activeDays].join('/');
+    return [stats.expense, stats.income, stats.savings, stats.transfers, stats.count, stats.activeDays].join('/');
   }
 
   function aiCacheSet(stats, text) {
@@ -2292,8 +2636,9 @@
           amount: e.amount,
           item: e.item || '支出',
           category: e.category || '其他',
-          type: e.type === 'income' ? 'income' : 'expense',
+          type: (e.type === 'income' || e.type === 'transfer') ? e.type : 'expense',
           account: typeof e.account === 'string' ? e.account : '',
+          toAccount: typeof e.toAccount === 'string' ? e.toAccount : '',
           raw: e.raw || '',
           note: typeof e.note === 'string' ? e.note.slice(0, 120) : '',
           ts: typeof e.ts === 'number' ? e.ts : Date.now()
@@ -2383,8 +2728,6 @@
 
       // 跳到最新一条导入记录所在的月份，方便马上核对
       var latest = '';
-      // 跳到最新一条导入记录所在的月份，方便马上核对
-      var latest = '';
       added.forEach(function (e) { if (e.date > latest) latest = e.date; });
       if (latest) {
         var lp = latest.split('-');
@@ -2455,11 +2798,14 @@
     if (!list.length) { showToast('这个月还没有记录可以导出'); return; }
     list.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : a.ts - b.ts; });
 
-    var rows = [['日期', '类型', '分类', '项目', '账户', '金额', '细节']];
+    var rows = [['日期', '类型', '分类', '项目', '账户', '转入账户', '金额', '细节']];
     for (var i = 0; i < list.length; i++) {
       var e = list[i];
-      rows.push([e.date, e.type === 'income' ? '收入' : '支出', e.category, e.item,
-        e.account ? accById(e.account).name : '未指定', e.amount.toFixed(2), e.note || '']);
+      var kind = e.type === 'income' ? '收入' : (e.type === 'transfer' ? '转账' : '支出');
+      rows.push([e.date, kind, e.category, e.item,
+        e.account ? accById(e.account).name : '未指定',
+        isTransfer(e) ? accById(e.toAccount || '').name : '',
+        e.amount.toFixed(2), e.note || '']);
     }
     var csv = '\ufeff' + rows.map(function (r) {
       return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',');
@@ -2495,7 +2841,8 @@
       [23, '餐饮', '奶茶', 16], [26, '日用', '纸巾', 39],
       [28, '餐饮', '聚餐', 210], [31, '购物', '外套', 399],
       [34, '交通', '加油', 300], [38, '餐饮', '蛋糕', 158],
-      [45, '娱乐', '演出门票', 280], [52, '收入', '奖金', 500]
+      [45, '娱乐', '演出门票', 280], [52, '收入', '奖金', 500],
+      [2, '储蓄', '存钱', 1000], [9, '储蓄', '存定期', 3000]
     ];
 
     var base = new Date();
@@ -2513,17 +2860,19 @@
     for (var i = 0; i < plan.length; i++) {
       var p = plan[i];
       var d = new Date(base.getFullYear(), base.getMonth(), base.getDate() - p[0]);
-      entries.push({
+      var row = {
         id: uid(),
         date: ymd(d),
         amount: p[3],
         item: p[2],
         category: p[1],
-        type: p[1] === '收入' ? 'income' : 'expense',
+        type: p[1] === '收入' ? 'income' : (p[1] === '储蓄' ? 'transfer' : 'expense'),
         account: accounts[i % accounts.length].id,
         raw: '示例数据',
         ts: d.getTime() + (8 + (i * 3) % 12) * 3600000 + (i * 7) % 60 * 60000
-      });
+      };
+      if (row.type === 'transfer') row.toAccount = SAVINGS_ID;
+      entries.push(row);
     }
     save();
     goToday();
@@ -2698,6 +3047,18 @@
       if (b) openCatDetail(b.getAttribute('data-cat'));
     });
 
+    // 账户视图提示条上的「看全部账户」
+    var accBar = $('#acc-bar');
+    if (accBar) accBar.addEventListener('click', function (e) {
+      if (e.target.closest('[data-acc-all]')) clearAccView();
+    });
+
+    // 储蓄那一格也能点开看它的账
+    var saveTile = $('#wallet-save');
+    if (saveTile) saveTile.addEventListener('click', function () {
+      if (!saveTile.hidden) viewAcc(SAVINGS_ID);
+    });
+
     $('#day-list').addEventListener('click', function (e) {
       var del = e.target.closest('[data-del]');
       if (del) { removeById(del.getAttribute('data-del')); return; }
@@ -2751,7 +3112,7 @@
       var b = e.target.closest('.w-item');
       if (!b) return;
       var id = b.getAttribute('data-acc');
-      if (id) { setCurrentAcc(id); return; }
+      if (id) { viewAcc(id); return; }
 
       // 「未指定」：早期没记账户的老账，一键归到当前账户
       var n = 0, i;
@@ -2807,7 +3168,7 @@
       if (e.target.closest('[data-go-record]')) switchTab('record');
     });
 
-    var chips = ['今天中饭20 晚饭39', '打车35', '前天奶茶18 电影45', '发工资8000'];
+    var chips = ['今天中饭20 晚饭39', '打车35', '前天奶茶18 电影45', '发工资8000', '支付宝转银行卡500', '存钱1000', '微信 奶茶18'];
     var box = $('#chips');
     chips.forEach(function (c) {
       var b = document.createElement('button');
@@ -2826,6 +3187,7 @@
       clearTimeout(rt);
       rt = setTimeout(function () {
         fitCalendarAmounts();
+        fitCalSum();
         ['pie-chart', 'line-chart'].forEach(function (id) {
           var el = document.getElementById(id);
           if (el && el.__inst) el.__inst.resize();

@@ -93,8 +93,19 @@
       keywords: ['礼物', '送礼', '请客', '份子钱', '随礼', '结婚', '生日', '满月', '探望',
         '孝敬', '给爸妈', '红包']
     },
+    {
+      name: '储蓄', color: '#0891b2', weight: 35,
+      keywords: ['存钱', '存起来', '存下', '攒钱', '储蓄', '存款', '存定期', '存进', '存入',
+        '存一笔', '固定存款', '零存整取']
+    },
     { name: '其他', color: '#94a3b8', weight: 0, keywords: [] }
   ];
+
+  // 「储蓄」不是花掉的钱，是钱换了个口袋；账户之间转账同理。
+  // 两者都记成 type = 'transfer'，统计时一律不算支出也不算收入。
+  var SAVINGS_NAME = '储蓄';
+  var TRANSFER_CAT = '转账';
+  var TRANSFER_COLOR = '#64748b';
 
   /* ---------------- L0：一词多义的硬规则 ---------------- */
   /* 顺序有意义：先判"收"，再判"发"，最后才是默认。 */
@@ -106,6 +117,9 @@
 
     // 苹果/小米… + 硬件 → 购物；单独「苹果」按水果走餐饮
     { re: /(苹果|apple|小米|华为|荣耀|联想|戴森|索尼|三星).{0,4}(手机|电脑|平板|耳机|手表|笔记本|显示器|充电器)/i, cat: '购物' },
+
+    // 「存 500」「再存500」：只写一个「存」字也是存进储蓄，别落到「其他」算成支出
+    { re: /(?:存|攒)\s*(?:了|下|点|些|上|进|入)?\s*[¥￥]?\d/, cat: '储蓄' },
 
     // 「XX卡」充值 → 交通；「会员」类订阅 → 娱乐
     { re: /(地铁|公交|加油|停车).{0,1}卡/, cat: '交通' },
@@ -309,6 +323,8 @@
   function cleanItem(s) {
     var t = ' ' + s + ' ';
     t = t.replace(/[，,。.!！?？;；:：、~～\-—_]/g, ' ');
+    // NOISE 里有「支付」，直接洗会把「支付宝」变成「宝」，先占位
+    t = t.replace(/支付宝/g, '\u0001');
     t = t.replace(NOISE, ' ');
     // 去掉数量词：「买2杯咖啡」-> 「咖啡」
     t = t.replace(/\d+\s*[个件杯份斤只盒瓶张位人次袋包条双套台部本支根片粒颗箱桶罐把副碗盘]/g, ' ');
@@ -318,9 +334,36 @@
     // 时间名词不进商品名（「下午茶」保留）
     t = t.replace(/(周末|平时|上午|下午|晚上|早上|凌晨|夜里|今天|昨天|前天|大前天|明天|后天|今早|今晚|昨晚|刚刚|刚才|上月|本月|下月|上个月|这个月|下个月)(?!茶)/g, ' ');
     t = t.replace(/(^|\s)(我|俺|在|给|去|的|了)+/g, ' ');
+    t = t.replace(/\u0001/g, '支付宝');
     t = t.replace(/\s+/g, ' ').trim();
     t = t.replace(/^[的了个着]+/, '').replace(/[的了个着]+$/, '').trim();
     return t;
+  }
+
+  // 「支付宝 咖啡25」里的账户名只说明钱从哪出，不进商品名
+  function stripAccName(item, accs) {
+    var t = String(item || '').trim();
+    if (!t || !accs || !accs.length) return t;
+    var hit = '';
+    for (var i = 0; i < accs.length; i++) {
+      var a = String(accs[i] || '').trim();
+      if (a && a.length > hit.length && t.indexOf(a) === 0) hit = a;
+    }
+    if (!hit) return t;
+    t = t.slice(hit.length).replace(/^[\s的从用]+/, '').trim();
+    return t;
+  }
+
+  // 句首就写了账户名（「微信 奶茶18」「支付宝咖啡25」）：这笔应该记到那个账户
+  function accHintOf(pre, accs) {
+    var t = String(pre || '').replace(/[\s，,。.、:：；;！!]/g, '').replace(/^(?:从|用|刷|拿|走)/, '');
+    if (!t || !accs || !accs.length) return '';
+    var hit = '';
+    for (var i = 0; i < accs.length; i++) {
+      var a = String(accs[i] || '').replace(/\s/g, '');
+      if (a && t.indexOf(a) === 0 && a.length > hit.length) hit = a;
+    }
+    return hit;
   }
 
   /* ---------------- 分类 ---------------- */
@@ -367,6 +410,124 @@
   function detectCategory(raw, item) {
     var res = classify((raw || '') + ' ' + (item || ''));
     return catByName(res.category);
+  }
+
+  /* ---------------- 账户之间转账 / 存钱取钱 ---------------- */
+  var SAVINGS_ALIAS = /(储蓄|存款|存折|储蓄卡|零存整取|存钱|攒钱|定期)/;
+  // 「支付宝余额」「银行卡里」这类后缀不影响认账户
+  var ACC_SUFFIX_RE = /(?:里面的|里面|里的|里|中的|中|上的|上|余额|账户|账号)$/;
+
+  // 账户名容错：命中最长的那个；认不出来再看是不是储蓄的说法
+  function matchAcc(name, accs) {
+    var t = String(name || '').replace(/[\s，,。.、:：；;！!]/g, '');
+    if (!t) return '';
+    var i, a;
+    for (i = 0; i < accs.length; i++) {
+      a = String(accs[i] || '').replace(/\s/g, '');
+      if (a && a === t) return a;
+    }
+    t = t.replace(ACC_SUFFIX_RE, '');
+    if (!t) return '';
+    var best = '';
+    for (i = 0; i < accs.length; i++) {
+      a = String(accs[i] || '').replace(/\s/g, '');
+      if (!a) continue;
+      if (a === t) return a;
+      if (t.indexOf(a) !== -1 && a.length > best.length) best = a;
+    }
+    if (best) return best;
+    if (t === SAVINGS_NAME || SAVINGS_ALIAS.test(t)) return SAVINGS_NAME;
+    return '';
+  }
+
+  // 去掉空格标点，正则才好对齐
+  function compact(s) {
+    return String(s == null ? '' : s).replace(/[\s，,。.、:：；;！!？?~～\-—_"'“”‘’]+/g, '');
+  }
+
+  /**
+   * 「钱换口袋」的动词，长的排前面：
+   * 先认「转到」，再退到「转」；先认「存到」，再退到「存」。
+   */
+  var TR_VERBS = ['转账到', '转账至', '转账给', '转账进', '转帐到', '转帐给', '转帐至',
+    '存钱到', '存钱进', '转到', '转至', '转给', '转入', '转进',
+    '存入', '存到', '存进', '取出到', '提现到', '取现到',
+    '转账', '转帐', '取出', '取现', '提现', '存', '攒', '转', '取'];
+
+  // 找句子里的动词，左边是转出方、右边是转入方（两边都可能为空）
+  function splitAtVerb(P) {
+    for (var i = 0; i < TR_VERBS.length; i++) {
+      var v = TR_VERBS[i];
+      var at = P.lastIndexOf(v);
+      if (at === -1) continue;
+      return { verb: v, left: P.slice(0, at), right: P.slice(at + v.length) };
+    }
+    return null;
+  }
+
+  // 存钱这笔该怎么叫（「存」一个字太含糊，写回「存钱」）
+  function savingsWord(pre) {
+    var w = compact(pre).replace(/^(?:从|由|用|把|拿)/, '').replace(/[的了着]+$/, '');
+    if (!w || w.length <= 1 || /^(?:存|攒|再存|又存|先存|多存|少存|存点|存些|存上|点儿)$/.test(w)) return '存钱';
+    return w.slice(0, 12);
+  }
+
+  /**
+   * 判断这一笔是不是「钱换口袋」。入参是金额前后的两段原文（空格标点无所谓）：
+   *   支付宝转银行卡5000 → { from: '支付宝', to: '银行卡' }
+   *   转到银行卡5000     → { from: '', to: '银行卡' }   ← 转出方由调用方补当前账户
+   *   存 500 / 存钱1000  → { from: '', to: '储蓄' }
+   *   从储蓄取出500      → { from: '储蓄', to: '' }     ← 落到现金/当前账户
+   * 两端都要对上账户（储蓄也算）才认，免得「转给朋友200」被当成转账。
+   */
+  function detectTransfer(pre, post, accs, isSavings) {
+    var P = compact(pre), Q = compact(post);
+
+    // 目标：剥掉「到/至/进/入/给/回/去」再看是不是账户
+    function targetOf(s) {
+      var t = compact(s).replace(/^(?:到|至|进入|进|入|给|回|去|在|往)/, '');
+      return t ? matchAcc(t, accs) : '';
+    }
+
+    var sp = P ? splitAtVerb(P) : null;
+    var from = '', to = '', verb = '';
+
+    if (sp) {
+      verb = sp.verb;
+      var left = sp.left.replace(/^(?:从|由|用|把|拿)/, '');
+      from = left ? matchAcc(left, accs) : '';
+      to = targetOf(sp.right);
+    }
+
+    // 目标写在金额后面：「转账5000到银行卡」「存500到银行卡」
+    if (!to && Q.length && Q.length <= 12 && !/转|存|取/.test(Q)) to = targetOf(Q);
+
+    var isTake = /取|提现/.test(verb);
+    var isSave = /存|攒/.test(verb);
+
+    // 取出来没说去处：落到现金（没有现金账户就交给调用方用当前账户）
+    if (from && !to && isTake) to = matchAcc('现金', accs) || '';
+    // 说了从哪个账户存、没说存哪：就是存进储蓄
+    if (from && !to && isSave) to = SAVINGS_NAME;
+
+    // 两端都没认出账户：只有「说完动词就没了」才算含糊的存钱/取钱
+    if (!from && !to) {
+      var tail = sp ? sp.right : '';
+      // 「存车费」「存款利息」里的「存」是词的一部分，不是"存进储蓄"
+      var bare = !tail || /^(?:点|些|一点儿|一点|一些|起来|进去|下来|上|钱|定期)$/.test(tail);
+      if (isSavings) return { from: '', to: SAVINGS_NAME };
+      if (!bare) return null;
+      if (isSave) return { from: '', to: SAVINGS_NAME };
+      // 「取出300 / 取现300」：从储蓄里拿钱出来，落到现金
+      if (isTake) return { from: SAVINGS_NAME, to: matchAcc('现金', accs) || '' };
+      // 「转账5000」：钱确实出去了，只是没说去处，别当成消费
+      // 「转给朋友200」右边写了人，但认不出账户 → 仍按支出（人情）
+      if (/^转/.test(verb)) return { from: '', to: '' };
+      return null;
+    }
+
+    if (from && to && from === to) return null;
+    return { from: from || '', to: to || '' };
   }
 
   /* ---------------- 多笔拆分 ---------------- */
@@ -510,7 +671,7 @@
    * 若前段被"花了/付了"之类吃掉而变空（如「花了20吃饭」），则借用金额后面的文字。
    * 日期优先用本段自带的，没有就继承前面最近一次出现的日期，仍没有则落在 base（当前选中日）。
    */
-  function buildItems(s, masked, amounts, dates, base, realToday) {
+  function buildItems(s, masked, amounts, dates, base, realToday, accs) {
     var items = [];
     var prevEnd = 0;
     for (var i = 0; i < amounts.length; i++) {
@@ -542,17 +703,50 @@
       var localRaw = masked.slice(segStart, am.end);
       var cat = detectCategory(localRaw, itemName);
       var type = cat.name === '收入' ? 'income' : 'expense';
+      itemName = stripAccName(itemName, accs);
       if (!itemName) itemName = type === 'income' ? '收入' : cat.name;
 
+      // 转账 / 存钱取钱：钱只是换了个口袋，既不算支出也不算收入
+      // 判断要用金额前后的原文：cleanItem 会把「支付」「钱」当噪音去掉，支付宝会变成「宝」
+      var tr = detectTransfer(masked.slice(segStart, am.start), masked.slice(am.end, nextStart),
+        accs, cat.name === SAVINGS_NAME);
+      var category = cat.name, color = cat.color, fromName = '', toName = '';
+      if (tr) {
+        type = 'transfer';
+        fromName = tr.from;
+        toName = tr.to;
+        if (toName === SAVINGS_NAME) {
+          // 存进储蓄：分类留在「储蓄」，名字写成「存钱」或「A → 储蓄」
+          category = SAVINGS_NAME;
+          color = catByName(SAVINGS_NAME).color;
+          if (fromName && fromName !== SAVINGS_NAME) itemName = fromName + ' → 储蓄';
+          else if (fromName === SAVINGS_NAME) itemName = '储蓄 → 当前账户';
+          else itemName = savingsWord(masked.slice(segStart, am.start));
+        } else if (fromName === SAVINGS_NAME) {
+          category = TRANSFER_CAT;
+          color = TRANSFER_COLOR;
+          itemName = '储蓄 → ' + (toName || '当前账户');
+        } else {
+          category = TRANSFER_CAT;
+          color = TRANSFER_COLOR;
+          itemName = (fromName || '当前账户') + ' → ' + (toName || '未指定');
+        }
+      }
+
       var dateStr = d ? d.date : ymd(base);
+      // 句首写了账户名（「微信 奶茶18」）就记到那个账户，没写由调用方用当前账户
+      var accName = tr ? '' : accHintOf(masked.slice(segStart, am.start), accs);
       items.push({
         date: dateStr,
         dateLabel: dateLabel(dateStr, realToday),
         amount: Math.round(am.amount * 100) / 100,
         item: itemName.slice(0, 24),
-        category: cat.name,
-        color: cat.color,
-        type: type
+        category: category,
+        color: color,
+        type: type,
+        fromName: fromName,
+        toName: toName,
+        accName: accName
       });
 
       prevEnd = usedNext ? descEnd : am.end;
@@ -605,7 +799,7 @@
     var amounts = scanAmounts(s, free);
     if (!amounts.length) return { ok: false, reason: 'amount', raw: raw, items: [], date: ymd(base) };
 
-    var items = buildItems(s, masked.join(''), amounts, dates, base, realToday);
+    var items = buildItems(s, masked.join(''), amounts, dates, base, realToday, (opts && opts.accounts) || []);
     var first = items[0];
     return {
       ok: true,
@@ -618,7 +812,10 @@
       item: first.item,
       category: first.category,
       color: first.color,
-      type: first.type
+      type: first.type,
+      fromName: first.fromName || '',
+      toName: first.toName || '',
+      accName: first.accName || ''
     };
   }
 
@@ -627,6 +824,9 @@
 
   var API = {
     CATEGORIES: CATEGORIES,
+    SAVINGS_NAME: SAVINGS_NAME,
+    TRANSFER_CAT: TRANSFER_CAT,
+    TRANSFER_COLOR: TRANSFER_COLOR,
     parseInput: parseInput,
     parseInputs: parseInputs,
     parseDatePhrase: parseDatePhrase,

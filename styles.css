@@ -166,7 +166,47 @@ body { -webkit-tap-highlight-color: transparent; }
 }
 .w-item.sel .w-amt { color: var(--ink); }
 .w-amt.neg { color: #ff9ea2; }
+/* 储蓄不是可切换的记账账户，做成只读的一格，放在账户滚动区外面 */
+.wallet-save {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  line-height: normal;
+  padding: 6px 11px; border-radius: 11px;
+  border: 1px dashed rgba(8, 145, 178, .58);
+  background: rgba(8, 145, 178, .17);
+  cursor: pointer;
+  transition: background .18s, box-shadow .18s;
+}
+.wallet-save:hover { background: rgba(8, 145, 178, .26); }
+.wallet-save.view { box-shadow: 0 0 0 3px rgba(8, 145, 178, .38); }
+.wallet-save[hidden] { display: none; }
+.wallet-save .w-name { color: rgba(206, 244, 252, .92); }
+.wallet-save .w-amt { color: #a9ecfa; }
 .w-item.sel .w-amt.neg { color: var(--danger); }
+/* 正在看这本账：白底上再加一圈亮边，一眼看出点的是谁 */
+.w-item.view { box-shadow: 0 0 0 3px rgba(255, 255, 255, .3), 0 8px 18px -10px rgba(0, 0, 0, .75); }
+.w-item.view .w-name { font-weight: 600; }
+
+/* 账户视图提示条：整页的数字都只算这本账 */
+.acc-bar {
+  display: flex; align-items: center; gap: 9px;
+  margin-bottom: 12px; padding: 8px 10px 8px 13px;
+  border-radius: 13px; min-width: 0;
+  background: #eef3ff; border: 1px solid #dbe4f8; color: #33415c;
+}
+.acc-bar[hidden] { display: none; }
+.ab-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ab-name { font-size: 12.5px; color: var(--ink); flex: none; }
+.ab-sub {
+  font-size: 11.5px; color: #6b7789; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.ab-all {
+  margin-left: auto; flex: none; font-size: 11.5px; color: #2f56c8;
+  background: #fff; border: 1px solid #cfdcf6; border-radius: 999px;
+  padding: 4px 11px; cursor: pointer; transition: background .18s, color .18s, border-color .18s;
+}
+.ab-all:hover { background: #2f56c8; border-color: #2f56c8; color: #fff; }
 
 .wallet-manage {
   flex: none; font-size: 12.5px; color: rgba(255, 255, 255, .84);
@@ -216,6 +256,11 @@ body { -webkit-tap-highlight-color: transparent; }
 .preview .pv-hint { color: var(--muted); }
 .preview .pv-warn { color: #d97706; }
 .preview strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* 句子里点名了账户：小胶囊标一下这笔记到哪 */
+.pv-acc {
+  font-size: 11px; padding: 1.5px 8px; border-radius: 999px; flex: none;
+  color: #4b5875; background: #eef2fa; border: 1px solid #e3e9f5;
+}
 
 /* 多笔预览 */
 .preview.is-multi { flex: 1 1 100%; width: 100%; min-width: 0; }
@@ -235,6 +280,7 @@ body { -webkit-tap-highlight-color: transparent; }
 .pv-list .pv-date { font-size: 11.5px; color: var(--muted); flex: none; }
 .pv-list .pv-amt { font-size: 13px; flex: none; font-variant-numeric: tabular-nums; }
 .pv-list .pv-amt.income { color: var(--income); }
+.pv-list .pv-amt.transfer { color: #7c8494; }
 
 /* 快捷标签 */
 .quick-bar {
@@ -358,7 +404,8 @@ body { -webkit-tap-highlight-color: transparent; }
 }
 .ghost-btn:hover { border-color: #d2d8e3; color: var(--ink); background: #fbfcfe; }
 
-.weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 3px; }
+/* minmax(0,1fr)：让列能缩到比金额还窄，否则窄屏上整张卡片会被撑宽 */
+.weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 3px; }
 
 /* 日历正上方的月度汇总条：本月支出 / 日均 / 收入 */
 .cal-sum {
@@ -386,11 +433,13 @@ body { -webkit-tap-highlight-color: transparent; }
 /* 日均是这张卡片的重点指标，用热力的暖色把它拎出来 */
 .cal-sum .cs-avg { background: #fdf3ed; }
 .cal-sum .cs-avg .cs-v { color: #c2562f; }
+/* 手机版把「按几天算的日均」缩成标签里的一小截，省掉金额后面的字 */
+.cal-sum .cs-d { display: none; font-style: normal; font-size: 9px; font-weight: 500; color: #bd8a72; letter-spacing: 0; }
 .weekdays span {
   text-align: center; font-size: 11px; color: #a7aebb;
   padding: 4px 0; letter-spacing: .3px;
 }
-.calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 
 .day {
   position: relative; aspect-ratio: 1 / .86;
@@ -461,6 +510,7 @@ body { -webkit-tap-highlight-color: transparent; }
   font-variant-numeric: tabular-nums; letter-spacing: -.5px; margin-top: 1px;
 }
 .day-totals .inc strong { color: var(--income); }
+.day-totals .tr strong { color: #7c8494; }
 
 /* 搜索栏 */
 .search-row { display: flex; align-items: center; gap: 9px; padding: 11px 0; }
@@ -533,8 +583,11 @@ body { -webkit-tap-highlight-color: transparent; }
 /* 当日分类汇总 */
 .day-summary:empty { display: none; }
 .day-summary { padding: 13px 0 14px; border-bottom: 1px solid var(--line); }
+/* 金额片段不要在中间折行 */
+.nowrap { white-space: nowrap; }
+
 .ds-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
-.ds-head b { font-size: 12px; font-weight: 600; color: var(--ink-2); letter-spacing: .2px; }
+.ds-head b { font-size: 12px; font-weight: 600; color: var(--ink-2); letter-spacing: .2px; white-space: nowrap; flex: none; }
 .ds-note { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ds-bar {
   display: flex; height: 7px; border-radius: 999px; overflow: hidden;
@@ -579,6 +632,8 @@ body { -webkit-tap-highlight-color: transparent; }
   text-decoration-color: #b9c0cc;
 }
 .entry-amt.income { color: var(--income); }
+/* 转账/储蓄：钱只是换了口袋，用中性灰，既不红也不绿 */
+.entry-amt.transfer { color: #7c8494; font-weight: 600; }
 .entry-note {
   margin-top: 4px; padding-left: 7px;
   border-left: 2px solid #e6e9f0;
@@ -830,6 +885,8 @@ select.f-inp { height: 36px; cursor: pointer; }
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   color: #fff; padding: 11px 14px 11px 17px;
   border-radius: 13px; font-size: 13px; max-width: calc(100vw - 32px);
+  /* left:50% 时可用宽度只剩半屏，不加 max-content 文字会被挤成三行 */
+  width: max-content;
   border: 1px solid rgba(255, 255, 255, .08);
   box-shadow: 0 22px 48px -16px rgba(0, 0, 0, .6);
   transition: opacity .24s, transform .24s;
@@ -972,80 +1029,208 @@ select.f-inp { height: 36px; cursor: pointer; }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 920px) {
-  .split { grid-template-columns: 1fr; }
-  .chart-grid { grid-template-columns: 1fr; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .chart-grid { grid-template-columns: minmax(0, 1fr); }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .day-card { min-height: 0; }
 }
 @media (max-width: 600px) {
   .app {
-    padding: 22px 14px 44px;
-    padding-left: max(14px, env(safe-area-inset-left));
-    padding-right: max(14px, env(safe-area-inset-right));
-    padding-bottom: max(44px, env(safe-area-inset-bottom));
+    padding: 12px 12px 36px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-bottom: max(36px, env(safe-area-inset-bottom));
   }
 
   /* iOS 上输入框字号小于 16px 时，聚焦会自动放大整页，这里统一抬到 16px */
   input, select, textarea { font-size: 16px !important; }
   #qi-amount { width: 88px; }
 
+  /* ---------- 顶栏：压成一行（图标 + 名字 + 分段切换） ---------- */
+  /* 「本月支出」在日历汇总里已经有一份，手机上不再重复占一行 */
+  .topbar { flex-wrap: nowrap; gap: 10px; margin-bottom: 10px; }
+  .brand { gap: 9px; }
+  .brand-mark { width: 32px; height: 32px; border-radius: 10px; }
+  .brand-mark svg { width: 17px; height: 17px; }
+  .brand-text h1 { font-size: 15.5px; }
   .brand-text p { display: none; }
-  .tabs { order: 3; width: 100%; margin-left: 0; }
-  .topbar-stat { margin-left: auto; }
-  .topbar-stat strong { font-size: 17px; }
+  .topbar-stat { display: none; }
+  .tabs { order: 0; width: auto; margin-left: auto; padding: 3px; border-radius: 11px; }
+  .tab { min-width: 54px; padding: 6px 10px; font-size: 12.5px; border-radius: 9px; }
+  .tab-ind { top: 3px; left: 3px; width: calc(50% - 3px); height: calc(100% - 6px); border-radius: 9px; }
 
-  .wallet { flex-wrap: wrap; gap: 11px; padding: 13px 15px; border-radius: 16px; }
+  /* ---------- 余额栏：固定两行（余额 + 管理 / 账户 + 储蓄） ---------- */
+  /* 用 grid 而不是 flex-wrap：储蓄那一格才不会被挤到第三行 */
+  .wallet {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 10px; row-gap: 8px; align-items: center;
+    padding: 10px 12px; border-radius: 15px; margin-bottom: 10px;
+  }
+  .wallet > .wallet-total { grid-area: 1 / 1; }
+  .wallet > .wallet-manage { grid-area: 1 / 2; margin-left: 0; justify-self: end; }
+  .wallet > .wallet-list { grid-area: 2 / 1; min-width: 0; }
+  .wallet > .wallet-save { grid-area: 2 / 2; }
+  .wallet > .wallet-meter { grid-column: 1 / -1; }
   .wallet-total { border-right: 0; padding-right: 0; }
-  .wallet-total strong { font-size: 22px; }
-  .wallet-manage { margin-left: auto; }
-  .wallet-list { order: 3; flex: 1 1 100%; }
-
-  .composer { padding: 14px 14px 12px; border-radius: 18px; }
+  .wt-lab { font-size: 9.5px; letter-spacing: .8px; line-height: 1.25; }
   .wt-tip { display: none; }
-  .day-badge { flex-wrap: nowrap; gap: 7px; padding: 7px 10px; }
+  .wt-budget { font-size: 10px; }
+  .wallet-total strong { font-size: 19px; line-height: 1.15; margin-top: 0; }
+  .wallet-manage { font-size: 11.5px; padding: 5px 10px; border-radius: 8px; }
+  .wallet-list {
+    gap: 6px; padding: 0;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 12px), transparent 100%);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 12px), transparent 100%);
+  }
+  .w-item { padding: 5px 9px; gap: 6px; border-radius: 9px; }
+  .w-name { font-size: 11.5px; }
+  .w-amt { font-size: 12px; }
+  .wallet-save { padding: 5px 9px; gap: 6px; border-radius: 9px; }
+  .wallet-save .w-name { font-size: 11.5px; }
+  .wallet-save .w-amt { font-size: 12px; }
+
+  /* 卡片统一圆角，别一半 20 一半 15 */
+  .card, .composer { border-radius: 16px; }
+
+  /* ---------- 输入区 ---------- */
+  .composer { padding: 11px 12px 9px; margin-bottom: 10px; }
+  .composer-row { gap: 8px; }
+  #nl-input { height: 42px; padding: 0 12px 0 36px; border-radius: 11px; }
+  .input-icon { left: 12px; width: 15px; height: 15px; }
+  .btn-primary { padding: 0 15px; font-size: 13.5px; border-radius: 11px; }
+  .composer-meta { flex-direction: column; align-items: stretch; gap: 8px; margin-top: 8px; min-height: 0; }
+  .preview { min-width: 0; font-size: 12px; }
+  .day-badge { flex-wrap: nowrap; gap: 7px; margin-bottom: 8px; padding: 6px 9px; }
   .day-badge .bd-tip { display: none; }
   .day-badge > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .btn-primary { padding: 13px; }
-  .composer-meta { flex-direction: column; align-items: stretch; gap: 8px; }
-  .preview { min-width: 0; }
-  .quick-bar { gap: 8px; }
+  .quick-bar { margin-top: 9px; padding-top: 9px; gap: 8px; }
+  .q-tag { padding: 5px 9px; font-size: 12px; border-radius: 8px; }
+  .quick-add { width: 26px; height: 26px; border-radius: 8px; font-size: 14px; }
   .quick-tags { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
   .quick-tags::-webkit-scrollbar { display: none; }
+  /* 标签放不下时右边缘淡出，比直接切一半好看 */
+  .quick-tags, .chips {
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 14px), transparent 100%);
+  }
   .qi-tip { display: none; }
-  .chips-line { min-width: 0; }
+  .chips-line { min-width: 0; margin-top: 9px; }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
   .chips::-webkit-scrollbar { display: none; }
-  .day .damt { font-size: calc(10px * var(--damt-scale, 1)); letter-spacing: -.3px; padding: 0; height: 11px; line-height: 11px; }
-  .day { gap: 1.5px; border-radius: 10px; }
-  .day .dnum { font-size: 12.5px; }
-  .day .dots { height: 3px; }
-  .day .dots i { width: 3px; height: 3px; }
-  .cal-sum { gap: 5px; margin-bottom: 8px; }
-  .cal-sum .cs { padding: 5px 7px 6px; border-radius: 9px; }
-  .cal-sum .cs-l { font-size: 9.5px; gap: 3px; }
-  .cal-sum .cs-l em { font-size: 9px; }
-  .cal-sum .cs-v { font-size: 13px; letter-spacing: -.3px; }
-  .cal-legend { margin-top: 9px; font-size: 9.5px; }
+
+  /* ---------- 日历 ---------- */
+  /* 日历和当日明细其实是一件事：合成一张卡，中间用分隔线，页面少一个白盒子 */
+  .split { gap: 0; }
+  .split > .calendar-card {
+    border-radius: 16px 16px 0 0; border-bottom: 0;
+    box-shadow: 0 -1px 2px rgba(15, 19, 25, .02), 0 12px 32px -22px rgba(15, 19, 25, .2);
+  }
+  .split > .day-card {
+    border-radius: 0 0 16px 16px; border-top: 1px solid var(--line);
+    box-shadow: 0 12px 32px -22px rgba(15, 19, 25, .2);
+  }
+  .calendar-card { padding: 12px 12px 9px; }
+  .card-head { margin-bottom: 10px; }
+  .month-nav h2 { font-size: 14px; min-width: 96px; }
+  .icon-btn { width: 27px; height: 27px; border-radius: 8px; font-size: 15px; }
+  .ghost-btn { font-size: 11.5px; padding: 5px 9px; border-radius: 8px; }
+  /* 汇总从「三块灰底」压成一条：标签在上、金额在下，数字独占整列宽，带小数也不会被省略 */
+  .cal-sum {
+    display: flex; gap: 0; margin: 0 0 8px; padding: 5px 2px 6px;
+    background: #f7f8fc; border-radius: 9px;
+  }
+  .cal-sum .cs {
+    flex: 1 1 0; min-width: 0;
+    flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    padding: 0 3px; background: none; border-radius: 0;
+  }
+  .cal-sum .cs + .cs { border-left: 1px solid #e8ebf2; }
+  .cal-sum .cs-avg { background: none; }
+  .cal-sum .cs-l { justify-content: center; font-size: 9px; gap: 2px; line-height: 1.2; }
+  .cal-sum .cs-l em { display: none; }
+  .cal-sum .cs-d { display: inline; font-size: 8.5px; }
+  .cal-sum .cs-v { width: 100%; font-size: 12.5px; letter-spacing: -.3px; line-height: 1.25; text-align: center; }
+  .weekdays { gap: 3px; margin-bottom: 2px; }
+  .weekdays span { font-size: 10px; padding: 3px 0; }
+  .calendar { gap: 3px; }
+  .day { aspect-ratio: 1 / .70; border-radius: 9px; gap: 1px; }
+  .day .dnum { font-size: 12px; }
+  .day .damt { font-size: calc(10px * var(--damt-scale, 1)); height: 11px; line-height: 11px; padding: 0; }
+  /* 手机上不点分类小圆点：热力底色 + 金额已经说明花得多不多，格子里少一行更干净 */
+  .day .dots { display: none; }
+  /* 格子里的金额自带 +/−，左图例省掉，只留热力色阶 */
+  .cal-legend { margin-top: 7px; justify-content: flex-end; font-size: 9px; }
+  .cal-legend .cl-sign { display: none; }
   .cal-legend .cl-heat i { width: 8px; height: 8px; border-radius: 2.5px; }
-  .calendar-card { padding: 16px 13px 12px; }
-  .day-card { padding: 16px 16px 10px; }
-  .day-head h2 { font-size: 15.5px; }
-  .day-totals strong { font-size: 17px; }
-  .wt-budget { font-size: 10px; }
-  .ai-card { padding: 15px 15px 12px; }
+
+  /* ---------- 当日明细 ---------- */
+  .day-card { padding: 12px 13px 8px; }
+  .day-head { gap: 10px; padding-bottom: 9px; }
+  .day-head h2 { font-size: 15px; }
+  .day-head p { font-size: 11px; margin-top: 1px; }
+  .day-totals { gap: 12px; }
+  .day-totals span { font-size: 9.5px; }
+  .day-totals strong { font-size: 15.5px; }
+  .search-row { padding: 8px 0; }
+  .search-box { height: 32px; border-radius: 9px; }
+  /* 手机上先把明细列出来，分类条挪到列表下面当小结：
+     否则它会紧跟搜索框出现，看着像搜索框下面挂了一根进度条 */
+  .day-card { display: flex; flex-direction: column; }
+  .day-head { order: 1; }
+  .search-row { order: 2; }
+  .entry-list { order: 3; }
+  .day-summary {
+    order: 4; margin-top: 10px; padding: 11px 0 0;
+    border-bottom: 0; border-top: 1px solid var(--line);
+  }
+  /* 「N 笔 · 支出 ¥X」在日头已经写过：只留分类条和分类胶囊 */
+  .ds-head { display: none; }
+  .day-summary.is-noteonly { padding: 0; border-top: 0; border-bottom: 0; margin-top: 8px; }
+  .day-summary.is-noteonly .ds-head { display: flex; margin: 7px 0 0; }
+  /* 只有收入/转账时，这行本身就是说明，别再顶一个「分类汇总」的标题 */
+  .day-summary.is-noteonly .ds-head b { display: none; }
+  .ds-bar { height: 6px; margin-bottom: 9px; }
+  .ds-pill { font-size: 11px; padding: 3px 8px; }
+  .entry { padding: 8px; margin: 0 -8px; gap: 9px; }
+  .entry-title { font-size: 13px; }
+  .entry-sub { font-size: 11px; gap: 6px; margin-top: 2px; }
+  .entry-amt { font-size: 13.5px; }
+  .entry-list { padding-top: 2px; }
+  .empty { padding: 34px 12px; }
+
+  /* ---------- 统计 ---------- */
+  .stat-grid { gap: 10px; margin-bottom: 12px; }
+  .stat-card { padding: 12px 13px 11px; border-radius: 14px; }
+  .stat-card .val { font-size: 19px; }
+  .chart { height: 240px; }
+  .chart-empty, .ftrend { height: 220px; }
+  .ai-card { padding: 13px 13px 11px; }
   .ai-head { gap: 8px; }
-  .ai-title h3 { font-size: 14px; }
+  .ai-title h3 { font-size: 13.5px; }
   .ai-actions { margin-left: auto; }
   .ai-render { max-height: none; }
-  .bb-tip { font-size: 11.5px; }
-  .stat-card { padding: 14px 15px 13px; }
-  .stat-card .val { font-size: 20px; }
-  .chart { height: 260px; }
-  .chart-empty, .ftrend { height: 240px; }
-  .modal { border-radius: 18px; }
-  .modal-head { padding: 18px 18px 8px; }
-  .modal-body { padding: 4px 18px 14px; }
-  .modal-foot { padding: 12px 18px 15px; }
+  .bb-tip { font-size: 11px; }
+
+  /* ---------- 底部：两行并一行，按钮平分宽度 ---------- */
+  .foot { margin-top: 14px; gap: 8px; }
+  .foot-note { display: none; }
+  .foot-actions { width: 100%; gap: 8px; }
+  .foot-btn { flex: 1; justify-content: center; padding: 8px 10px; }
+  .more-wrap { flex: 1; display: flex; }
+  .more-btn { width: 100%; justify-content: center; }
+
+  .modal { border-radius: 16px; }
+  .modal-head { padding: 16px 16px 8px; }
+  .modal-body { padding: 4px 16px 12px; }
+  .modal-foot { padding: 10px 16px 13px; }
+}
+
+
+/* 320 这类超窄屏：汇总条再缩一档，优先保住金额不被省略 */
+@media (max-width: 360px) {
+  /* 汇总条的字号交给 fitCalSum 按列宽决定，这里不再降档，免得窄屏上小到看不清 */
+  .day-totals { gap: 9px; }
+  .day-totals strong { font-size: 14.5px; }
 }
 
 /* ============ 记账时自己选分类 ============ */
