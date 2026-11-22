@@ -1,90 +1,230 @@
-# Welcome to GitHub
+# 随手记 · 本地记账
 
-Welcome to GitHub—where millions of developers work together on software. Ready to get started? Let’s learn how this all works by building and publishing your first GitHub Pages website!
+一个**纯前端、零后端、数据不出本机**的记账 PWA。核心是一句话记账：像说话一样输入「今天买咖啡花了 25 元」，它自动解析出日期、金额、事由、分类和收支方向，直接落账。
 
-## Repositories
+不需要注册，不上传任何数据，断网也能用。装到手机桌面后和原生 App 没有区别。
 
-Right now, we’re in your first GitHub **repository**. A repository is like a folder or storage space for your project. Your project's repository contains all its files such as code, documentation, images, and more. It also tracks every change that you—or your collaborators—make to each file, so you can always go back to previous versions of your project if you make any mistakes.
+> 在线访问：<https://superahua.github.io/hello-world/>
 
-This repository contains three important files: The HTML code for your first website on GitHub, the CSS stylesheet that decorates your website with colors and fonts, and the **README** file. It also contains an image folder, with one image file.
+---
 
-## Describe your project
+## 为什么有它
 
-You are currently viewing your project's **README** file. **_README_** files are like cover pages or elevator pitches for your project. They are written in plain text or [Markdown language](https://guides.github.com/features/mastering-markdown/), and usually include a paragraph describing the project, directions on how to use it, who authored it, and more.
+记账软件的通病是**录入成本太高**。选分类、点日期、填金额，三步操作记一笔 15 块的早饭，多数人坚持不了一周。
 
-[Learn more about READMEs](https://help.github.com/en/articles/about-readmes)
+这个项目把入口压到极致：**一个输入框，说一句话**。剩下的交给解析引擎。
 
-## Your first website
+---
 
-**GitHub Pages** is a free and easy way to create a website using the code that lives in your GitHub repositories. You can use GitHub Pages to build a portfolio of your work, create a personal website, or share a fun project that you coded with the world. GitHub Pages is automatically enabled in this repository, but when you create new repositories in the future, the steps to launch a GitHub Pages website will be slightly different.
+## 功能
 
-[Learn more about GitHub Pages](https://pages.github.com/)
+### 一句话记账
 
-## Rename this repository to publish your site
+输入框支持自然语言，回车即记账：
 
-We've already set-up a GitHub Pages website for you, based on your personal username. This repository is called `hello-world`, but you'll rename it to: `username.github.io`, to match your website's URL address. If the first part of the repository doesn’t exactly match your username, it won’t work, so make sure to get it right.
+| 你说 | 它理解成 |
+|---|---|
+| `今天买咖啡花了25元` | 今天 · 支出 25 · 餐饮 · 咖啡 |
+| `打车35` | 支出 35 · 交通 · 打车 |
+| `昨天奶茶18` | 昨天 · 支出 18 · 餐饮 · 奶茶 |
+| `二十五块买菜` | 支出 25 · 餐饮 · 买菜 |
+| `¥88 加油` | 支出 88 · 交通 · 加油 |
+| `发红包200` | 支出 200 · 人情 |
+| `收红包200` | **收入** 200 |
 
-Let's get started! To update this repository’s name, click the `Settings` tab on this page. This will take you to your repository’s settings page. 
+**能识别的要素**
 
-![repo-settings-image](https://user-images.githubusercontent.com/18093541/63130482-99e6ad80-bf88-11e9-99a1-d3cf1660b47e.png)
+- **金额** —— `25元` / `25块` / `25块钱` / `¥25` / `二十五块`（中文数字），也支持裸数字（`打车35`）
+- **日期** —— `今天` `昨天` `前天` `大前天` `昨晚` `今早`，以及 `3号` 这类具体日期（未到的号数自动归到上月）
+- **多笔** —— `早饭15 午饭28 打车12` 一句话记三笔，各自独立成条
+- **收支方向** —— 命中收入类词汇即判为收入，其余默认支出
 
-Under the **Repository Name** heading, type: `username.github.io`, where username is your username on GitHub. Then click **Rename**—and that’s it. When you’re done, click your repository name or browser’s back button to return to this page.
+**分类可以手动改**。解析结果先出预览，点分类标签即可逐笔覆盖，改完再提交。预览里能直接看到最终落账的样子。
 
-<img width="1039" alt="rename_screenshot" src="https://user-images.githubusercontent.com/18093541/63129466-956cc580-bf85-11e9-92d8-b028dd483fa5.png">
+### 分类体系
 
-Once you click **Rename**, your website will automatically be published at: https://your-username.github.io/. The HTML file—called `index.html`—is rendered as the home page and you'll be making changes to this file in the next step.
+12 个类目，按优先级四层判定：
 
-Congratulations! You just launched your first GitHub Pages website. It's now live to share with the entire world
+| 层级 | 规则 |
+|---|---|
+| L0 强规则 | 正则先判死。「收红包」≠「发红包」，「苹果手机」≠「买苹果」 |
+| L1 最长匹配 | 关键词越长越具体。「宽带费」压过「宽带」，「地铁卡」压过「地铁」 |
+| L2 命中数量 | 同长度时，命中词更多的类目胜出 |
+| L3 类目权重 | 仍平则按具体程度：医疗/居住 > 餐饮/购物 |
+| L4 兜底 | 归入「其他」 |
 
-## Making your first edit
+类目：**餐饮 · 交通 · 购物 · 日用 · 居住 · 娱乐 · 医疗 · 学习 · 通讯 · 人情 · 收入 · 其他**
 
-When you make any change to any file in your project, you’re making a **commit**. If you fix a typo, update a filename, or edit your code, you can add it to GitHub as a commit. Your commits represent your project’s entire history—and they’re all saved in your project’s repository.
+词库覆盖常见品牌和场景（星巴克、瑞幸、麦当劳、滴滴、地铁卡、优衣库、京东、物业费……），维护时遵循一条原则：**一词多义交给 L0 强规则，不要在两个类目里各写一遍**。
 
-With each commit, you have the opportunity to write a **commit message**, a short, meaningful comment describing the change you’re making to a file. So you always know exactly what changed, no matter when you return to a commit.
+### 日历视图
 
-## Practice: Customize your first GitHub website by writing HTML code
+按月展示，每天格子里直接显示当日金额。支出高的日子颜色更深（热力图），一眼看出钱花在哪几天。点任意一天查看该日明细，可逐条删除。
 
-Want to edit the site you just published? Let’s practice commits by introducing yourself in your `index.html` file. Don’t worry about getting it right the first time—you can always build on your introduction later.
+### 账户与余额
 
-Let’s start with this template:
+预置**支付宝 / 微信 / 银行卡 / 现金**四个账户，可增删改、自定义颜色。支持：
+
+- 每个账户独立余额与流水
+- 记账时指定扣款账户，或点账户切换当前记账对象
+- 「未指定」账户兜底，不强迫你填
+
+### 预算
+
+设定月预算后，顶部余额栏下方出现进度条。接近或超出时变色提醒。
+
+### 快捷标签
+
+把高频小额支出做成标签（早饭、奶茶、咖啡……），点一下填好分类和名称，只需再补金额。标签可自定义增删。
+
+### 统计
+
+三个时间维度切换：**本周 / 本月 / 本年**。
+
+- 总支出、总收入、结余、日均
+- **分类饼图**（ECharts）—— 各类目占比，点击穿透到该类目明细
+- **趋势折线图** —— 逐日/逐月走势
+- **文字洞察** —— 自动生成结论，比如环比涨跌、最大开销日、平均消费频次
+
+### AI 收支分析
+
+内置 AI 分析入口，接**任何 OpenAI 兼容接口**，默认预填 DeepSeek：
 
 ```
-<p>Hello World! I’m [username]. This is my website!</p>
+接口地址：https://api.deepseek.com/v1
+模型：deepseek-chat
+密钥：sk-...
 ```
 
-To add your introduction, copy our template and click the edit pencil icon at the top right hand corner of the `index.html` file.
+填入密钥后，可让 AI 基于你的账目数据生成分析报告，**流式输出**，边生成边显示。
 
-<img width="997" alt="edit-this-file" src="https://user-images.githubusercontent.com/18093541/63131820-0794d880-bf8d-11e9-8b3d-c096355e9389.png">
+隐私默认保守：`发送明细` 开关**默认关闭**，只上传汇总统计；打开后才会把逐笔明细发给模型。密钥仅保存在本机 `localStorage`，不经过任何第三方服务器。
 
+### 数据管理
 
-Delete this placeholder line:
+- **JSON 备份 / 恢复** —— 导出全量数据为 JSON，可跨设备迁移
+- **CSV 导出** —— 导出明细，方便丢进 Excel
+- **删除可撤销** —— 删条目后有 5 秒撤销窗口，误删不吃亏
+- **一键清空** —— 带二次确认
+- **示例数据** —— 首次使用可灌入演示数据，先看清长什么样再决定
+
+### 离线可用（PWA）
+
+Service Worker 预缓存全部静态资源：
+
+- 装到手机/桌面后断网照样打开
+- 打开页面走网络优先（拿最新版），失败退回缓存
+- 静态资源缓存优先（秒开），后台静默更新
+- 新版本发布后，旧缓存自动清理
+
+---
+
+## 技术实现
+
+**没有框架、没有构建、没有依赖管理**。三个 JS 文件就是全部逻辑，改完直接刷新浏览器即可看到效果。
+
+| 层 | 实现 |
+|---|---|
+| 结构 | 单文件 `index.html`，语义化标签 |
+| 样式 | 原生 CSS（自定义属性 + Grid/Flex），内置深色适配变量 |
+| 逻辑 | 原生 JS，IIFE 模块化，`'use strict'` |
+| 解析 | 自研自然语言解析引擎，纯正则 + 优先级规则，无 NLP 库 |
+| 图表 | ECharts 5（本地 `vendor/`，不依赖 CDN） |
+| 存储 | `localStorage`，5 个独立键 |
+| 离线 | Service Worker + Cache API |
+
+**存储键**
 
 ```
-<p>Welcome to your first GitHub Pages website!</p>
+shoujizhang.entries.v1    账目明细
+shoujizhang.accounts.v1   账户
+shoujizhang.tpls.v1       快捷标签
+shoujizhang.settings.v1   设置（预算 / AI 配置）
+shoujizhang.ai.v1         AI 分析结果缓存
 ```
 
-Then, paste the template to line 15 and fill in the blanks.
+键名带 `.v1` 后缀，为将来数据迁移留出空间。
 
-<img width="1032" alt="edit-githuboctocat-index" src="https://user-images.githubusercontent.com/18093541/63132339-c3a2d300-bf8e-11e9-8222-59c2702f6c42.png">
+---
 
+## 项目结构
 
-When you’re done, scroll down to the `Commit changes` section near the bottom of the edit page. Add a short message explaining your change, like "Add my introduction", then click `Commit changes`.
+```
+.
+├── index.html              入口（单页，含记账/统计两个视图）
+├── styles.css              全部样式
+├── parser.js               自然语言解析引擎（分类词库 + 金额/日期提取）
+├── app.js                  应用逻辑（渲染、状态、图表、AI、备份）
+├── sw.js                   Service Worker（离线缓存）
+├── manifest.json           PWA 清单
+├── vendor/
+│   └── echarts.min.js      图表库（本地化，离线可用）
+├── favicon.png
+├── icon-180.png            iOS 主屏图标
+├── icon-192.png            Android 图标
+├── icon-512.png            高分屏 / maskable 图标
+└── icon.ico                Windows 图标
+```
 
+---
 
-<img width="1030" alt="add-my-username" src="https://user-images.githubusercontent.com/18093541/63131801-efbd5480-bf8c-11e9-9806-89273f027d16.png">
+## 本地运行
 
-Once you click `Commit changes`, your changes will automatically be published on your GitHub Pages website. Refresh the page to see your new changes live in action.
+必须用 HTTP 服务，不能双击 `index.html` 打开（Service Worker 和 `manifest.json` 需要同源 HTTP 环境）：
 
-:tada: You just made your first commit! :tada:
+```bash
+# Python 3
+python -m http.server 8000
 
-## Extra Credit: Keep on building!
+# 或 Node
+npx serve .
+```
 
-Change the placeholder Octocat gif on your GitHub Pages website by [creating your own personal Octocat emoji](https://myoctocat.com/build-your-octocat/) or [choose a different Octocat gif from our logo library here](https://octodex.github.com/). Add that image to line 12 of your `index.html` file, in place of the `<img src=` link.
+然后访问 <http://localhost:8000>。
 
-Want to add even more code and fun styles to your GitHub Pages website? [Follow these instructions](https://github.com/github/personal-website) to build a fully-fledged static website.
+**手机端体验**：用手机浏览器打开局域网地址（`http://<电脑IP>:8000`），在浏览器菜单里选「添加到主屏幕」，即可获得全屏无地址栏的独立 App 体验。
 
-![octocat](./images/create-octocat.png)
+---
 
-## Everything you need to know about GitHub
+## 部署
 
-Getting started is the hardest part. If there’s anything you’d like to know as you get started with GitHub, try searching [GitHub Help](https://help.github.com). Our documentation has tutorials on everything from changing your repository settings to configuring GitHub from your command line.
+纯静态站点，任意静态托管都能跑：
+
+- **GitHub Pages** —— 推送到 `main`/`master` 分支，在仓库 Settings → Pages 选择分支根目录即可
+- **Vercel / Netlify / Cloudflare Pages** —— 直接导入仓库，无需构建命令，输出目录填 `.`
+- **任意 Web 服务器** —— 把文件丢进站点根目录
+
+### 改完代码记得改版本号
+
+`sw.js` 第 4 行：
+
+```js
+var V = 'v9';   // 每次发布改成 v10、v11……
+```
+
+不改的话，老用户会一直用缓存里的旧版本。改了之后 `activate` 阶段会自动清掉旧缓存。
+
+---
+
+## 已知边界
+
+- **数据存本机** —— 换设备、清浏览器数据都会丢。**请定期用 JSON 备份**
+- **无多端同步** —— 刻意不做。要同步就得有账号和后端，随之而来的是隐私成本和运维成本
+- **AI 分析需自备密钥** —— 不内置代理，密钥你自己填
+- **浏览器隐私模式下数据不持久** —— 关闭窗口即丢
+
+---
+
+## 设计取向
+
+三个刻意的取舍：
+
+1. **不做云同步** —— 记账数据是高度私密的财务信息，放本机比放服务器更让人安心
+2. **不做账号体系** —— 打开就能用，没有注册墙
+3. **不引入框架** —— 一个记账工具不值得背 React 的体积和构建链，原生 JS 足够，且十年后还能跑
+
+---
+
+## License
+
+MIT
