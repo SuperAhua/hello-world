@@ -160,8 +160,8 @@
           <div class="val" id="stat-year">¥0</div>
           <div class="sub" id="stat-year-sub">—</div>
         </div>
-        <div class="stat-card">
-          <div class="lab">本月收入</div>
+        <div class="stat-card" id="stat-income-card">
+          <div class="lab" id="stat-income-lab">本月收入</div>
           <div class="val income" id="stat-income">¥0</div>
           <div class="sub" id="stat-income-sub">—</div>
         </div>
@@ -226,6 +226,7 @@
         </button>
         <div class="more-menu" id="more-menu" role="menu" hidden>
           <button type="button" role="menuitem" data-act="settings">设置 · 预算与 AI</button>
+          <button type="button" role="menuitem" data-act="mode" id="mm-mode">显示模式：全部</button>
           <button type="button" role="menuitem" data-act="backup">备份全部数据</button>
           <button type="button" role="menuitem" data-act="restore">导入备份（补到现有数据）…</button>
           <span class="mm-sep"></span>

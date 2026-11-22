@@ -1,7 +1,7 @@
 /* 随手记 Service Worker
    目标：装到手机桌面后，断网也能打开；有网时静默更新。
    改完代码重新发布时，把 V 改一下（如 v2），旧缓存会在 activate 阶段清掉。 */
-var V = 'v15';
+var V = 'v19';
 var CACHE = 'shoujizhang-' + V;
 
 var ASSETS = [

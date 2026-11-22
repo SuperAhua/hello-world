@@ -141,6 +141,22 @@ body { -webkit-tap-highlight-color: transparent; }
 }
 .wallet-total strong.neg { color: #ff979b; }
 
+/* 只看支出模式：余额整块收起，页面上不留占位 */
+.wallet[hidden] { display: none; }
+/* 只看支出模式下，收入那笔的金额位只留一道短横，不做成一排圆点 */
+.entry-amt.is-masked { color: #c8cfda; font-weight: 500; letter-spacing: 0; }
+
+/* 深色钱包底上的眼睛 */
+.bal-eye {
+  width: 22px; height: 22px; flex: none; border-radius: 7px;
+  display: grid; place-items: center;
+  color: rgba(255, 255, 255, .42);
+  transition: color .14s, background .14s;
+}
+.bal-eye svg { width: 15px; height: 15px; }
+.bal-eye:hover { color: rgba(255, 255, 255, .9); background: rgba(255, 255, 255, .12); }
+.bal-eye.off { color: rgba(255, 255, 255, .28); }
+
 .wallet-list {
   flex: 1; display: flex; gap: 8px; min-width: 0;
   overflow-x: auto; padding: 2px 0; scrollbar-width: none;
@@ -752,6 +768,12 @@ body { -webkit-tap-highlight-color: transparent; }
 .more-menu button:hover { background: #f5f7fb; color: var(--ink); }
 .more-menu button.danger { color: var(--danger); }
 .more-menu button.danger:hover { background: #fef3f3; }
+/* 隐私模式开着时，菜单项自带一个实心点做提示 */
+.more-menu button.on { color: var(--primary); }
+.more-menu button.on::after {
+  content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px;
+  border-radius: 50%; background: currentColor; vertical-align: middle;
+}
 .mm-sep { display: block; height: 1px; background: var(--line); margin: 5px 6px; }
 
 /* ---------- 弹窗 ---------- */
@@ -826,6 +848,16 @@ select.f-inp { height: 36px; cursor: pointer; }
   transition: background .14s, color .14s;
 }
 .row-x:hover { background: #fef1f1; color: var(--danger); }
+/* 账户行里的余额眼睛（浅色底） */
+.row-eye {
+  width: 26px; height: 26px; flex: none; border-radius: 8px;
+  display: grid; place-items: center; color: #c5cbd5;
+  transition: background .14s, color .14s;
+}
+.row-eye svg { width: 16px; height: 16px; }
+.row-eye:hover { background: #f2f4fa; color: #7b8698; }
+.row-eye.off { color: var(--primary); }
+.row-eye.off:hover { background: #eef1ff; }
 .add-row {
   margin-top: 14px; width: 100%; padding: 10px; border-radius: 10px;
   border: 1px dashed #cfd8fb; background: #f8f9ff; color: var(--primary);

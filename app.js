@@ -68,7 +68,9 @@
     apiBase: 'https://api.deepseek.com/v1',
     apiKey: '',
     model: 'deepseek-chat',
-    sendDetail: false
+    sendDetail: false,
+    hide: {},         // 单账户余额隐藏：{ 账户id: true, __total__: true }
+    mode: 'normal'    // 显示模式：normal 全部可见 / expense 只看支出
   };
   var aiBusy = false;
   var aiAbort = null;
@@ -82,6 +84,9 @@
         if (typeof o.apiKey === 'string') settings.apiKey = o.apiKey;
         if (typeof o.model === 'string') settings.model = o.model;
         settings.sendDetail = !!o.sendDetail;
+        if (o.hide && typeof o.hide === 'object') settings.hide = o.hide;
+        settings.mode = (o.mode === 'expense') ? 'expense' : 'normal';
+        if (!o.mode && o.privacy) settings.mode = 'expense';   // 兼容旧的 privacy 字段
       }
     } catch (err) { }
   }
@@ -93,6 +98,50 @@
   function hasAI() {
     return !!(settings.apiKey && settings.apiBase && settings.model);
   }
+
+  /* ---------------- 余额可见性 ----------------
+     纯粹是显示层的开关，不动任何数据：隐藏的账户照常参与总余额计算，
+     统计页也照常统计。键是账户 id；总余额用 __total__，储蓄用 acc_savings。 */
+  var HIDE_TOTAL = '__total__';
+  var EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.2 12S5.9 5.6 12 5.6 21.8 12 21.8 12 18.1 18.4 12 18.4 2.2 12 2.2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>';
+  var EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.2 12S5.9 5.6 12 5.6 21.8 12 21.8 12 18.1 18.4 12 18.4 2.2 12 2.2 12z"/><circle cx="12" cy="12" r="2.8"/><line x1="3.8" y1="3.8" x2="20.2" y2="20.2"/></svg>';
+
+  function isBalHidden(key) {
+    if (isExpenseOnly()) return true;   // 只看支出时，余额一律不显示
+    return !!(settings.hide && settings.hide[key]);
+  }
+
+  /* 「只看支出」模式：余额、收入、结余全部下掉，页面上只剩花了多少。
+     数据一分不动，统计照常算，切回「全部」立刻恢复。 */
+  function isExpenseOnly() { return settings.mode === 'expense'; }
+
+  function toggleBalHidden(key) {
+    settings.hide = settings.hide || {};
+    if (settings.hide[key]) delete settings.hide[key];
+    else settings.hide[key] = true;
+    saveSettings();
+  }
+
+  /* 显示模式：全部 / 只看支出。选完存本地，下次打开还是这个模式。 */
+  function toggleMode() {
+    settings.mode = isExpenseOnly() ? 'normal' : 'expense';
+    saveSettings();
+    syncModeItem();
+    renderAll();
+    showToast(isExpenseOnly()
+      ? '已切到「只看支出」：余额、收入、结余都收起来了'
+      : '已切回「全部」：余额和收入都回来了');
+  }
+
+  function syncModeItem() {
+    var el = $('#mm-mode');
+    if (!el) return;
+    el.textContent = '显示模式：' + (isExpenseOnly() ? '只看支出' : '全部');
+    el.classList.toggle('on', isExpenseOnly());
+  }
+
+  function maskMoney() { return '••••'; }
+
 
   function $(sel) { return document.querySelector(sel); }
 
@@ -310,6 +359,10 @@
   }
 
   function renderWallet() {
+    // 只看支出：整块余额栏收起，不留「¥••••」这种刻意的占位
+    var walletEl = document.querySelector('.wallet');
+    if (walletEl) walletEl.hidden = isExpenseOnly();
+
     var rows = accounts.slice();
     if (hasUnknownAcc()) rows.push(PSEUDO_ACC);
 
@@ -320,12 +373,13 @@
       var a = rows[i];
       var bal = a.id ? accBalance(a.id) : accFlow('');
       if (a.id) sum += bal;
+      var hid = isBalHidden(a.id);
       html += '<button class="w-item' + (a.id === currentAccId ? ' sel' : '') + (a.id === accView ? ' view' : '') +
         '" type="button" data-acc="' + esc(a.id) + '" title="' +
         (a.id === accView ? '再点一次回到全部账户' : '点这里只看这本账') + '">' +
         '<i class="w-dot" style="background:' + a.color + '"></i>' +
         '<span class="w-name">' + esc(a.name) + '</span>' +
-        '<b class="w-amt' + (bal < -0.005 ? ' neg' : '') + '">' + fmtSigned(bal) + '</b>' +
+        '<b class="w-amt' + (!hid && bal < -0.005 ? ' neg' : '') + '">' + (hid ? maskMoney() : fmtSigned(bal)) + '</b>' +
         '</button>';
     }
     $('#wallet-list').innerHTML = html;
@@ -336,9 +390,12 @@
       if (hasSavings()) {
         var sv = accBalance(SAVINGS_ID);
         sum += sv;
+        var svHid = isBalHidden(SAVINGS_ID);
         saveEl.innerHTML = '<i class="w-dot" style="background:' + SAVINGS_ACC.color + '"></i>' +
           '<span class="w-name">储蓄</span>' +
-          '<b class="w-amt' + (sv < -0.005 ? ' neg' : '') + '">' + fmtSigned(sv) + '</b>';
+          '<b class="w-amt' + (!svHid && sv < -0.005 ? ' neg' : '') + '">' + (svHid ? maskMoney() : fmtSigned(sv)) + '</b>' +
+          '<button class="bal-eye' + (svHid ? ' off' : '') + '" type="button" data-eye="' + SAVINGS_ID +
+          '" title="' + (svHid ? '显示储蓄余额' : '隐藏储蓄余额') + '">' + (svHid ? EYE_OFF_SVG : EYE_SVG) + '</button>';
         saveEl.hidden = false;
         saveEl.classList.toggle('view', accView === SAVINGS_ID);
         saveEl.title = accView === SAVINGS_ID
@@ -351,8 +408,9 @@
     }
 
     var sumEl = $('#wallet-sum');
-    sumEl.textContent = fmtSigned(sum);
-    sumEl.classList.toggle('neg', sum < -0.005);
+    var totHid = isBalHidden(HIDE_TOTAL);
+    sumEl.textContent = totHid ? maskMoney() : fmtSigned(sum);
+    sumEl.classList.toggle('neg', !totHid && sum < -0.005);
 
     // 一个余额都还没设过时，按钮改成「设置余额」，比「管理账户」更像下一步动作
     var blank = true;
@@ -575,7 +633,7 @@
     // 储蓄没有收支，只有存进去、取出来
     var sub = accView === SAVINGS_ID
       ? (viewMonth + 1) + '月 存入 ¥' + fmt(put) + (take > 0 ? ' · 取出 ¥' + fmt(take) : '')
-      : (viewMonth + 1) + '月 支出 ¥' + fmt(exp) + (inc > 0 ? ' · 收入 ¥' + fmt(inc) : '');
+      : (viewMonth + 1) + '月 支出 ¥' + fmt(exp) + (inc > 0 && !isExpenseOnly() ? ' · 收入 ¥' + fmt(inc) : '');
     el.innerHTML = '<i class="ab-dot" style="background:' + acc.color + '"></i>' +
       '<b class="ab-name">' + esc(acc.name) + '</b>' +
       '<span class="ab-sub">' + sub + '</span>' +
@@ -718,7 +776,7 @@
         }
         var bits = [];
         if (c.data.exp > 0) bits.push('支出 ¥' + fmt(c.data.exp));
-        if (c.data.inc > 0) bits.push('收入 ¥' + fmt(c.data.inc));
+        if (c.data.inc > 0 && !isExpenseOnly()) bits.push('收入 ¥' + fmt(c.data.inc));
         if (c.data.put > 0) bits.push('存入 ¥' + fmt(c.data.put));
         if (c.data.take > 0) bits.push('取出 ¥' + fmt(c.data.take));
         tip = (viewMonth + 1) + '月' + c.num + '日' + (bits.length ? ' · ' + bits.join(' · ') : '');
@@ -733,7 +791,7 @@
         else if (c.data && net < 0) amt = '<span class="damt exp">-' + moneyShort(-net) + '</span>';
       } else if (c.data && c.data.exp > 0) {
         amt = '<span class="damt exp">-' + moneyShort(c.data.exp) + '</span>';
-      } else if (c.data && c.data.inc > 0) {
+      } else if (c.data && c.data.inc > 0 && !isExpenseOnly()) {
         amt = '<span class="damt inc">+' + moneyShort(c.data.inc) + '</span>';
       }
       // 消费热力：按当天支出在「本月单日最高」里的位置分 5 档，一眼看出哪天花得狠
@@ -777,7 +835,7 @@
       ? '<b class="cs-v">-¥' + fmt(mExp) + '</b>'
       : '<b class="cs-v cs-zero">¥0</b>';
 
-    var csThird = mInc > 0
+    var csThird = (mInc > 0 && !isExpenseOnly())
       ? '<span class="cs-l">' + mLabel + '收入</span><b class="cs-v inc">+¥' + fmt(mInc) + '</b>'
       : '<span class="cs-l">记账天数</span><b class="cs-v">' + activeDays + ' 天</b>';
 
@@ -867,7 +925,7 @@
 
     // 0 的那一项就别占位置了：只有收入的一天写「支出 ¥0」纯属噪音
     var totals = exp > 0 ? '<div><span>支出</span><strong>¥' + fmt(exp) + '</strong></div>' : '';
-    if (inc > 0) totals += '<div class="inc"><span>收入</span><strong>¥' + fmt(inc) + '</strong></div>';
+    if (inc > 0 && !isExpenseOnly()) totals += '<div class="inc"><span>收入</span><strong>¥' + fmt(inc) + '</strong></div>';
     if (trs > 0) totals += '<div class="tr"><span>' + (accView === SAVINGS_ID ? '存取' : '转账') +
       '</span><strong>¥' + fmt(trs) + '</strong></div>';
     $('#day-totals').innerHTML = totals;
@@ -897,7 +955,9 @@
         '</div>' +
         (e.note ? '<div class="entry-note">' + esc(e.note) + '</div>' : '') +
         '</div>' +
-        '<div class="entry-amt' + entryAmtCls(e) + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>' +
+        (e.type === 'income' && isExpenseOnly()
+          ? '<div class="entry-amt is-masked" title="只看支出模式下不显示收入金额">—</div>'
+          : '<div class="entry-amt' + entryAmtCls(e) + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>') +
         '<button class="entry-del" data-del="' + e.id + '" title="删除这笔">×</button>' +
         '</div>';
     }
@@ -929,7 +989,7 @@
       if (inc > 0 || trs > 0) box.classList.add('is-noteonly');
       box.innerHTML = (inc > 0 || trs > 0)
         ? '<div class="ds-head"><b>分类汇总</b><span class="ds-note">' +
-          (inc > 0 ? dayWord + '只有收入 ¥' + fmt(inc) : dayWord + '没有支出') +
+          (inc > 0 ? dayWord + '只有收入' + (isExpenseOnly() ? '' : ' ¥' + fmt(inc)) : dayWord + '没有支出') +
           (trNote ? ' · ' + trNote : '') + '</span></div>'
         : '';
       return;
@@ -958,7 +1018,7 @@
     }
 
     var note = list.length + ' 笔 · 支出 ¥' + fmt(exp);
-    if (inc > 0) note += ' · 收入 ¥' + fmt(inc);
+    if (inc > 0 && !isExpenseOnly()) note += ' · 收入 ¥' + fmt(inc);
     if (trNote) note += ' · ' + trNote;
 
     box.innerHTML = '<div class="ds-head"><b>分类汇总</b><span class="ds-note">' + note + '</span></div>' +
@@ -1024,7 +1084,7 @@
 
     // 0 的那一项就别占位置了：只有收入的一天写「支出 ¥0」纯属噪音
     var totals = exp > 0 ? '<div><span>支出</span><strong>¥' + fmt(exp) + '</strong></div>' : '';
-    if (inc > 0) totals += '<div class="inc"><span>收入</span><strong>¥' + fmt(inc) + '</strong></div>';
+    if (inc > 0 && !isExpenseOnly()) totals += '<div class="inc"><span>收入</span><strong>¥' + fmt(inc) + '</strong></div>';
     if (trs > 0) totals += '<div class="tr"><span>' + (accView === SAVINGS_ID ? '存取' : '转账') +
       '</span><strong>¥' + fmt(trs) + '</strong></div>';
     $('#day-totals').innerHTML = totals;
@@ -1056,7 +1116,9 @@
         '</div>' +
         (e.note ? '<div class="entry-note">' + esc(e.note) + '</div>' : '') +
         '</div>' +
-        '<div class="entry-amt' + entryAmtCls(e) + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>' +
+        (e.type === 'income' && isExpenseOnly()
+          ? '<div class="entry-amt is-masked" title="只看支出模式下不显示收入金额">—</div>'
+          : '<div class="entry-amt' + entryAmtCls(e) + '" title="点这里补细节">' + sign + '¥' + fmt(e.amount) + '</div>') +
         '<button class="entry-del" data-del="' + e.id + '" title="删除这笔">×</button>' +
         '</div>';
     }
@@ -1243,7 +1305,7 @@
 
     var head = '识别到 <b>' + r.count + '</b> 笔';
     if (exp > 0) head += ' · 支出 <b>¥' + fmt(exp) + '</b>';
-    if (inc > 0) head += ' · 收入 <b class="pv-inc">¥' + fmt(inc) + '</b>';
+    if (inc > 0) head += ' · 收入 <b class="pv-inc">¥' + (isExpenseOnly() ? '—' : fmt(inc)) + '</b>';
     if (trn > 0) head += ' · 转账 <b>¥' + fmt(trn) + '</b>';
 
     box.classList.add('is-multi');
@@ -1337,7 +1399,7 @@
     });
     var msg = '已记 <b>' + added.length + '</b> 笔';
     if (exp > 0) msg += ' · 支出 <b>¥' + fmt(exp) + '</b>';
-    if (inc > 0) msg += ' · 收入 <b>¥' + fmt(inc) + '</b>';
+    if (inc > 0 && !isExpenseOnly()) msg += ' · 收入 <b>¥' + fmt(inc) + '</b>';
     if (trn > 0) msg += ' · 转账 <b>¥' + fmt(trn) + '</b>';
     var days = Object.keys(daySet);
     msg += '（' + (days.length === 1 ? esc(r.items[0].dateLabel) : days.length + ' 天') + '）';
@@ -1472,8 +1534,20 @@
       (saveTotal > 0 ? '<br><span class="nowrap">储蓄 ¥' + fmt(saveTotal) + ' 未计入支出</span>' : '');
     $('#stat-year').textContent = '¥' + fmt(yearTotal);
     $('#stat-year-sub').textContent = viewYear + '年 · ' + src.filter(function (x) { return x.date.slice(0, 4) === String(viewYear); }).length + ' 笔记录';
-    $('#stat-income').textContent = '¥' + fmt(monthInc);
-    $('#stat-income-sub').textContent = monthInc > 0 ? ('结余 ' + fmtSigned(monthInc - monthTotal)) : '本月暂无收入记录';
+    // 收入卡：只看支出模式下不遮不藏，直接换成「日均支出」——同一格给支出维度的信息
+    var incLab = $('#stat-income-lab'), incVal = $('#stat-income');
+    if (isExpenseOnly()) {
+      var avgN2 = avgDays(viewYear, viewMonth);
+      if (incLab) incLab.textContent = '日均支出';
+      incVal.textContent = '¥' + fmt(Math.round(avgN2 ? monthTotal / avgN2 : 0));
+      incVal.classList.remove('income');
+      $('#stat-income-sub').textContent = avgN2 ? ('按 ' + avgN2 + ' 天算') : '本月暂无支出';
+    } else {
+      if (incLab) incLab.textContent = '本月收入';
+      incVal.textContent = '¥' + fmt(monthInc);
+      incVal.classList.add('income');
+      $('#stat-income-sub').textContent = monthInc > 0 ? ('结余 ' + fmtSigned(monthInc - monthTotal)) : '本月暂无收入记录';
+    }
 
     // 图表标题
     var chartWho = accView ? accViewName() + ' · ' : '';
@@ -1555,7 +1629,7 @@
       else sentence += '。';
       parts.push(sentence);
     }
-    if (income > 0) {
+    if (income > 0 && !isExpenseOnly()) {
       parts.push('本月收入 <b>¥' + fmt(income) + '</b>，结余 <b>' + fmtSigned(income - total) + '</b>。');
     }
     if (saveTotal > 0) {
@@ -1835,11 +1909,14 @@
 
   function accRowHtml(a) {
     var val = a.id ? accBalance(a.id).toFixed(2) : '';
+    var hid = a.id ? isBalHidden(a.id) : false;
     return '<div class="acc-row" data-id="' + esc(a.id || '') + '">' +
       '<input class="f-inp acc-name" maxlength="10" autocomplete="off" value="' + esc(a.name || '') + '" placeholder="账户名">' +
       '<label class="acc-bal"><span>¥</span>' +
       '<input class="acc-bal-in" type="text" inputmode="decimal" autocomplete="off" value="' + val + '" placeholder="0.00">' +
       '</label>' +
+      (a.id ? '<button class="row-eye' + (hid ? ' off' : '') + '" type="button" data-eye="' + esc(a.id) +
+        '" title="' + (hid ? '显示这个账户的余额' : '隐藏这个账户的余额') + '">' + (hid ? EYE_OFF_SVG : EYE_SVG) + '</button>' : '') +
       '<button class="row-x" type="button" title="删除这个账户">×</button>' +
       '</div>';
   }
@@ -1862,7 +1939,7 @@
     for (var i = 0; i < accounts.length; i++) html += accRowHtml(accounts[i]);
     openModal({
       title: '账户与余额',
-      sub: '余额 = 期初余额 + 收入 − 支出。直接填你现在各账户里的钱就行，保存后会自动扣掉已记的收支；删除账户时它里面的记录会变成「未指定」。',
+      sub: '余额 = 期初余额 + 收入 − 支出。直接填你现在各账户里的钱就行，保存后会自动扣掉已记的收支；删除账户时它里面的记录会变成「未指定」。点右侧眼睛可隐藏该账户余额，只影响显示，不影响统计。',
       html: '<div id="acc-rows">' + html + '</div>' +
         '<button class="add-row" type="button" data-add="acc">＋ 添加账户</button>',
       saveText: '保存',
@@ -3053,9 +3130,10 @@
       if (e.target.closest('[data-acc-all]')) clearAccView();
     });
 
-    // 储蓄那一格也能点开看它的账
+    // 储蓄那一格也能点开看它的账；点眼睛只切显示，不进视图
     var saveTile = $('#wallet-save');
-    if (saveTile) saveTile.addEventListener('click', function () {
+    if (saveTile) saveTile.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('[data-eye]')) return;
       if (!saveTile.hidden) viewAcc(SAVINGS_ID);
     });
 
@@ -3085,6 +3163,7 @@
     moreBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       var willOpen = moreMenu.hidden;
+      if (willOpen) syncModeItem();
       moreMenu.hidden = !willOpen;
       moreBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
     });
@@ -3097,6 +3176,7 @@
       var act = b.getAttribute('data-act');
       closeMore();
       if (act === 'settings') openSettings();
+      else if (act === 'mode') toggleMode();
       else if (act === 'backup') backupJson();
       else if (act === 'restore') $('#restore-file').click();
       else if (act === 'seed') seedDemo();
@@ -3126,6 +3206,28 @@
       showToast('已把 ' + n + ' 条记录归到 ' + esc(target.name));
     });
     $('#wallet-manage').addEventListener('click', openAccModal);
+
+    // 账户余额的眼睛（钱包区的储蓄格 + 账户弹窗里的每一行）。
+    // 走捕获阶段，抢在储蓄格的「点开看这本账」之前把点击吃掉。
+    document.addEventListener('click', function (e) {
+      var eye = e.target.closest ? e.target.closest('[data-eye]') : null;
+      if (!eye) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var key = eye.getAttribute('data-eye');
+      if (!key) return;
+      // 「只看支出」是粗粒度模式，单个账户的眼睛在它下面动不了，免得点了没反应
+      if (isExpenseOnly()) {
+        showToast('当前是「只看支出」模式，先切回「全部」再单独设置各账户');
+        return;
+      }
+      toggleBalHidden(key);
+      var hid = isBalHidden(key);
+      eye.innerHTML = hid ? EYE_OFF_SVG : EYE_SVG;
+      eye.classList.toggle('off', hid);
+      eye.setAttribute('title', hid ? '显示余额' : '隐藏余额');
+      renderWallet();
+    }, true);
 
     // 设置 / AI 分析
     $('#ai-run').addEventListener('click', runAI);
@@ -3211,6 +3313,7 @@
     updatePreview();
     renderAll();
     renderAI();
+    syncModeItem();
   }
 
   init();
