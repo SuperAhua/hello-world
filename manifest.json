@@ -1,6 +1,6 @@
 {
-  "name": "PAYMENT-WALLET",
-  "short_name": "PAYMENT-WALLET",
+  "name": "随手记 · 本地记账",
+  "short_name": "随手记",
   "description": "日历视图、一句话记账、分类统计。数据只存在这台设备。",
   "lang": "zh-CN",
   "start_url": "./",

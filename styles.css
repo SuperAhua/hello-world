@@ -80,7 +80,7 @@ body { -webkit-tap-highlight-color: transparent; }
   box-shadow: 0 10px 22px -13px rgba(38, 56, 190, .95), inset 0 1px 0 rgba(255, 255, 255, .4);
 }
 .brand-mark svg { width: 21px; height: 21px; }
-.brand-text h1 { font-size: 17.5px; font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
+.brand-text h1 { font-size: 17.5px; font-weight: 650; letter-spacing: -.2px; }
 .brand-text p { font-size: 11.5px; color: var(--muted); margin-top: 1px; letter-spacing: .1px; }
 
 .tabs {
@@ -990,7 +990,6 @@ select.f-inp { height: 36px; cursor: pointer; }
   #qi-amount { width: 88px; }
 
   .brand-text p { display: none; }
-  .brand-text h1 { font-size: 14px; letter-spacing: 0; }
   .tabs { order: 3; width: 100%; margin-left: 0; }
   .topbar-stat { margin-left: auto; }
   .topbar-stat strong { font-size: 17px; }
